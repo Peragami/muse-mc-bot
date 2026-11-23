@@ -1195,15 +1195,30 @@ setInterval(async () => {
         // Survival first: at low health, do not start a fight bare-handed —
         // fall back and eat to regen. (A 17hp fist-fight vs husk+enderman
         // killed the bot in the 2026-11-23 live test.)
-        if (bot.health <= 8) {
+        if (bot.health <= 10) {
           autoBusy = true; autoLabel = '撤退中'; desiredState = 'busy';
           console.log(`[auto] health low (${bot.health}) — retreating from ${h.name}`);
           say('体力が少ないから逃げるね');
           try {
+            // Pathfinding is too slow on this server to trust in an emergency
+            // (retreat gotos timed out deciding while a skeleton kept
+            // shooting, 2026-11-23): sprint straight away first, then walk
+            // farther with the pathfinder once there is some distance.
+            const { Vec3 } = require('vec3');
             const p = bot.entity.position;
-            await gotoWatched(new goals.GoalNear(p.x + (p.x - h.position.x) * 2, p.y, p.z + (p.z - h.position.z) * 2, 2), 12000, 'retreat');
-            const food = bestFoodItem();
-            if (food && bot.food < 20) { try { await bot.equip(food, 'hand'); await bot.consume(); lastEatAt = Date.now(); } catch {} }
+            const away = new Vec3(p.x + (p.x - h.position.x) * 3, p.y + 1.6, p.z + (p.z - h.position.z) * 3);
+            try {
+              await bot.lookAt(away, true);
+              bot.setControlState('forward', true); bot.setControlState('sprint', true); bot.setControlState('jump', true);
+              await new Promise(r => setTimeout(r, 600));
+              bot.setControlState('jump', false);
+              await new Promise(r => setTimeout(r, 2900));
+              bot.clearControlStates();
+            } catch {}
+            if (!nearestHostile(10)) {
+              const food = bestFoodItem();
+              if (food && bot.food < 20) { try { await bot.equip(food, 'hand'); await bot.consume(); lastEatAt = Date.now(); } catch {} }
+            }
           } catch (e) { console.log('[auto] retreat failed:', e.message); }
           if (desiredState === 'busy') desiredState = 'idle';
           autoBusy = false; autoLabel = '';
@@ -1214,7 +1229,8 @@ setInterval(async () => {
         if (weapon) { try { await bot.equip(weapon, 'hand'); } catch {} }
         console.log(`[auto] fighting ${h.name} at ${bot.entity.position.distanceTo(h.position).toFixed(1)}m`);
         // Abort mid-fight if health crashes.
-        const hpWatch = setInterval(() => { try { if (bot.health <= 5 && bot.pvp) { console.log('[auto] health critical — stopping fight'); if (bot.pvp.forceStop) bot.pvp.forceStop(); else if (bot.pvp.stop) bot.pvp.stop(); } } catch {} }, 500);
+        let hpStopped = false;
+        const hpWatch = setInterval(() => { try { if (!hpStopped && bot.health <= 5 && bot.pvp) { hpStopped = true; console.log('[auto] health critical — stopping fight'); if (bot.pvp.forceStop) bot.pvp.forceStop(); else if (bot.pvp.stop) bot.pvp.stop(); } } catch {} }, 500);
         try { await withTimeout(bot.pvp.attack(h), 15000, 'autoFight'); } catch (e) { console.log('[auto] fight gave up:', e.message); }
         clearInterval(hpWatch);
         if (desiredState === 'busy') desiredState = 'idle';
@@ -1433,8 +1449,11 @@ bot.on('spawn', () => {
       if (!bot.entity || !bot.time) return;
       if (!bot.time.isDay) { if (settings.nightSurvival) nightSurvival(); return; }
       // Daytime: walk back to the death spot to recover dropped items (5 min
-      // despawn) when nothing hostile is around.
-      if (settings.autoRecover && deathPos && !nearestHostile(12)) {
+      // despawn) when nothing hostile is around. But after repeated deaths
+      // the drops are not worth dying for again (the bot died twice more
+      // walking back into a skeleton's range, 2026-11-23): skip recovery
+      // once the death loop breaker is hot.
+      if (settings.autoRecover && deathPos && !nearestHostile(12) && deathTimes.length < 2) {
         const dp = deathPos; deathPos = null;
         say('落としたものを回収しに行くね');
         autoBusy = true; // keep the auto tick out of the recovery's pathfinding
