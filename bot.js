@@ -880,6 +880,70 @@ function startViewer() {
   } catch (e) { console.log(`[viewer] FAILED (canvas/WebGL dependency?): ${e.message}`); }
 }
 
+// ---- settings (dashboard toggles, persisted to settings.json) ----
+const fs2 = require('fs');
+const path2 = require('path');
+const SETTINGS_PATH = path2.join(__dirname, 'settings.json');
+const settings = { autoEat: true, autoFight: true, autoPickup: true, nightSurvival: true, autoRecover: true };
+function loadSettings() {
+  try {
+    const j = JSON.parse(fs2.readFileSync(SETTINGS_PATH, 'utf8'));
+    for (const k of Object.keys(settings)) if (typeof j[k] === 'boolean') settings[k] = j[k];
+  } catch {}
+  console.log('[settings] loaded:', JSON.stringify(settings));
+}
+function saveSettings() {
+  try { fs2.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2)); } catch (e) { console.log('[settings] save failed:', e.message); }
+}
+loadSettings();
+
+// ---- auto behaviors (dashboard-toggleable) ----
+let autoBusy = false;
+let lastEatAt = 0;
+setInterval(async () => {
+  try {
+    if (!bot.entity || !bot.inventory || autoBusy) return;
+    // Eat when hungry (health only regens while fed). 15s cooldown.
+    if (settings.autoEat && bot.food <= 14 && Date.now() - lastEatAt > 15000) {
+      const food = bot.inventory.items().find(i => isFood(i.name));
+      if (food) {
+        autoBusy = true; lastEatAt = Date.now();
+        console.log(`[auto] eating ${food.name} (food=${bot.food})`);
+        try { await bot.equip(food, 'hand'); await bot.consume(); } catch (e) { console.log('[auto] eat failed:', e.message); }
+        autoBusy = false;
+        return;
+      }
+    }
+    // Fight hostiles that come close (not during missions: checkDanger covers
+    // step boundaries there; not during night survival: its loop fights too).
+    if (settings.autoFight && !anyMissionActive() && !nightMode) {
+      const h = nearestHostile(8);
+      if (h) {
+        autoBusy = true;
+        const weapon = bot.inventory.items().find(i => i.name.endsWith('_sword')) || bot.inventory.items().find(i => i.name.endsWith('_axe')) || bot.inventory.items().find(i => i.name.endsWith('_pickaxe'));
+        if (weapon) { try { await bot.equip(weapon, 'hand'); } catch {} }
+        console.log(`[auto] fighting ${h.name} at ${bot.entity.position.distanceTo(h.position).toFixed(1)}m`);
+        try { await withTimeout(bot.pvp.attack(h), 15000, 'autoFight'); } catch (e) { console.log('[auto] fight gave up:', e.message); }
+        autoBusy = false;
+        return;
+      }
+    }
+    // Pick up dropped items lying around (idle only, within 24 blocks).
+    if (settings.autoPickup && !anyMissionActive() && !nightMode) {
+      const drops = Object.values(bot.entities).filter(e => e && e !== bot.entity && e.position && e.name === 'item' && bot.entity.position.distanceTo(e.position) <= 24);
+      if (drops.length) {
+        drops.sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position));
+        const d = drops[0];
+        autoBusy = true;
+        console.log(`[auto] picking up drop at ${d.position}`);
+        try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(d.position.x, d.position.y, d.position.z, 1)), 15000, 'autoPickup'); await new Promise(r => setTimeout(r, 600)); } catch (e) { console.log('[auto] pickup failed:', e.message); }
+        autoBusy = false;
+        return;
+      }
+    }
+  } catch (e) { console.log('[auto] tick error:', e.message); autoBusy = false; }
+}, 3000);
+
 // ---- state API + dashboard (only when STATE_PORT set) ----
 const STATE_PORT = process.env.STATE_PORT ? parseInt(process.env.STATE_PORT, 10) : 0;
 let stateServerStarted = false;
@@ -918,7 +982,25 @@ function startStateServer() {
     const path = require('path');
     const dashPath = path.join(__dirname, 'dashboard.html');
     const srv = http.createServer((req, res) => {
-      if (req.url === '/api/state') {
+      if (req.url === '/api/settings' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(settings));
+      } else if (req.url === '/api/settings' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (c) => { body += c; if (body.length > 1000) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const j = JSON.parse(body);
+            if (!(j.key in settings) || typeof j.value !== 'boolean') { res.writeHead(400); res.end('bad setting'); return; }
+            settings[j.key] = j.value;
+            if (j.key === 'nightSurvival' && j.value === false) nightMode = false;
+            saveSettings();
+            console.log(`[settings] ${j.key} = ${j.value}`);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify(settings));
+          } catch (e) { res.writeHead(400); res.end('bad request'); }
+        });
+      } else if (req.url === '/api/state') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
         res.end(JSON.stringify(botState()));
       } else if (req.url === '/' || req.url === '/dashboard.html') {
@@ -992,7 +1074,9 @@ async function nightSurvival() {
       const p = bot.entity.position;
       const ang = Math.random() * Math.PI * 2;
       const dist = 14 + Math.random() * 10;
-      try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + Math.cos(ang) * dist, p.y, p.z + Math.sin(ang) * dist, 2)), 20000, 'night wander'); } catch (e) { console.log(`[night] wander failed: ${e.message}`); }
+      const tx = p.x + Math.cos(ang) * dist, tz = p.z + Math.sin(ang) * dist;
+      console.log(`[night] wander from (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}) to (${tx.toFixed(1)}, ${tz.toFixed(1)})`);
+      try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(tx, p.y, tz, 2)), 20000, 'night wander'); console.log(`[night] wander arrived at (${bot.entity.position.x.toFixed(1)}, ${bot.entity.position.z.toFixed(1)})`); } catch (e) { console.log(`[night] wander failed: ${e.message}`); }
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (e) { console.log('[night] survival error:', e.message); }
@@ -1005,10 +1089,10 @@ bot.on('spawn', () => {
   setTimeout(async () => {
     try {
       if (!bot.entity || !bot.time) return;
-      if (!bot.time.isDay) { nightSurvival(); return; }
+      if (!bot.time.isDay) { if (settings.nightSurvival) nightSurvival(); return; }
       // Daytime: walk back to the death spot to recover dropped items (5 min
       // despawn) when nothing hostile is around.
-      if (deathPos && !nearestHostile(12)) {
+      if (settings.autoRecover && deathPos && !nearestHostile(12)) {
         const dp = deathPos; deathPos = null;
         say('落としたものを回収しに行くね');
         try {
@@ -1027,7 +1111,7 @@ setInterval(() => {
   try {
     if (!bot.entity || !bot.time || nightMode) return;
     const looped = deathTimes.length >= 3;
-    if (!bot.time.isDay && (looped || !anyMissionActive())) { console.log(`[night] watchdog engaging survival (looped=${looped})`); nightSurvival(); }
+    if (settings.nightSurvival && !bot.time.isDay && (looped || !anyMissionActive())) { console.log(`[night] watchdog engaging survival (looped=${looped})`); nightSurvival(); }
   } catch {}
 }, 20000);
 bot.on('kicked', (r) => console.log('kicked:', r));
