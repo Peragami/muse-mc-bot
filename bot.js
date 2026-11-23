@@ -522,7 +522,17 @@ async function pickaxeMission() {
       for (let i = 0; i < 3 && !bot.inventory.items().some(it => it.name === 'crafting_table'); i++) await new Promise(r => setTimeout(r, 1000));
       if (!bot.inventory.items().some(i => i.name === 'crafting_table')) throw new Error('作業台がない');
       if (findCraftingTable()) return;
-      await placeItemOnGround('crafting_table');
+      // placeBlock can be refused on a marginal cell and placeItemOnGround gives
+      // up on the first refusal; retry from slightly different stances.
+      let lastErr = null;
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try { await placeItemOnGround('crafting_table'); } catch (e) { lastErr = e; console.log(`[pickaxe] place attempt ${attempt + 1} failed: ${e.message}`); }
+        await new Promise(r => setTimeout(r, 800));
+        if (findCraftingTable()) return;
+        try { const p = bot.entity.position; await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + 2 - attempt, p.y, p.z + 1 + attempt, 1)), 20000, 'place shuffle'); } catch {}
+      }
+      if (lastErr) throw lastErr;
+      throw new Error('作業台を置けなかった');
     });
     await step('木のツルハシを作る', async () => {
       if (countItem('wooden_pickaxe') > 0) return;
