@@ -756,7 +756,8 @@ async function withdrawFromChest(query) {
     if (!chestBlock) { say('拠点のチェストが見つからない'); return; }
     await gotoWatched(new goals.GoalNear(chestBlock.position.x, chestBlock.position.y, chestBlock.position.z, 2), 30000, 'to chest');
     const chest = await bot.openContainer(chestBlock);
-    const item = chest.items().find(i => i.name === name) || chest.items().find(i => i.name.includes(name));
+    const inChest = containerItems(chest);
+    const item = inChest.find(i => i.name === name) || inChest.find(i => i.name.includes(name));
     if (!item) { snapshotChest(chest); try { chest.close(); } catch {} say(`${query}はチェストに入ってない`); return; }
     const cnt = item.count;
     await chest.withdraw(item.type, null, cnt);
@@ -1286,8 +1287,17 @@ function findHomeChest() {
   if (memory.chest) { const { Vec3 } = require('vec3'); return bot.blockAt(new Vec3(memory.chest.x, memory.chest.y, memory.chest.z)); }
   return null;
 }
+function containerItems(container) {
+  // container.items() on this stack returns the PLAYER's side of the window;
+  // the container's own slots are [0, inventoryStart). (Live 2026-11-23: a
+  // snapshot after depositing read back the bot's kept food/tools.)
+  try {
+    const start = (typeof container.inventoryStart === 'number') ? container.inventoryStart : 27;
+    return (container.slots || []).slice(0, start).filter(Boolean);
+  } catch { return []; }
+}
 function snapshotChest(container) {
-  try { memory.chestContents = container.items().map(i => ({ name: i.name, count: i.count })); saveMemory(); console.log('[memory] chest snapshot:', memory.chestContents.map(i => `${i.name}x${i.count}`).join(', ') || '(empty)'); } catch {}
+  try { memory.chestContents = containerItems(container).map(i => ({ name: i.name, count: i.count })); saveMemory(); console.log('[memory] chest snapshot:', memory.chestContents.map(i => `${i.name}x${i.count}`).join(', ') || '(empty)'); } catch {}
 }
 
 // ---- auto behaviors (dashboard-toggleable) ----
