@@ -229,8 +229,15 @@ async function placeItemOnGround(itemName) {
       if (!ground || ground.boundingBox !== 'block') continue;
       const cell = bot.blockAt(base.offset(dx, dy, dz));
       if (!cell || !REPLACEABLE.has(cell.name)) continue;
-      await bot.placeBlock(ground, new Vec3(0, 1, 0));
-      return true;
+      // A refused placeBlock on one marginal cell used to abort the whole
+      // placement (live 2026-11-23 pickaxe run). Catch, verify, move on.
+      try {
+        await bot.placeBlock(ground, new Vec3(0, 1, 0));
+        await new Promise(r => setTimeout(r, 400));
+        const placed = bot.blockAt(base.offset(dx, dy, dz));
+        if (placed && placed.name === itemName) return true;
+        console.log(`[place] ${itemName} at ${dx},${dy},${dz} did not stick (${placed ? placed.name : '?'}), trying next cell`);
+      } catch (e) { console.log(`[place] placeBlock refused at ${dx},${dy},${dz}: ${e.message}; trying next cell`); }
     }
   }
   // Fallback: dig out a spot. In a 1-wide dug shaft every neighbour cell is stone,
@@ -367,9 +374,24 @@ async function craftItem(itemName, count = 1) {
     // Verify the item actually arrived; a "successful" bot.craft under lag can produce nothing
     // (wooden_pickaxe in run10: craft returned, inventory unchanged). Retry the craft itself.
     for (let retry = 0; retry < 2 && countItem(itemName) <= beforeCount; retry++) {
+      // The first craft's product can land AFTER the verify window above; re-poll
+      // briefly before spending ingredients on a duplicate (live 2026-11-23: a lagged
+      // crafting_table craft produced 2 tables and starved the pickaxe of planks).
+      for (let i = 0; i < 5 && countItem(itemName) <= beforeCount; i++) await new Promise(r => setTimeout(r, 1000));
+      if (countItem(itemName) > beforeCount) break;
       console.log(`[craft] ${itemName}: no item after craft, retry ${retry + 1}`);
       const t2 = findCraftingTable() || table; const rs = bot.recipesFor(item.id, null, 1, t2) || recipes;
       try { await bot.craft(rs[0], count, t2 || undefined); } catch (e) { console.log(`[craft] ${itemName} retry failed: ${e.message}`); }
+      for (let i = 0; i < 8 && countItem(itemName) <= beforeCount; i++) await new Promise(r => setTimeout(r, 1000));
+    }
+    if (countItem(itemName) <= beforeCount) {
+      // Final settle attempt: pause, refresh table + recipes, one last craft.
+      // Silent no-op crafts on this slow CT cleared after a pause in the
+      // 2026-11-23 pickaxe run once the mission retried from the outside.
+      console.log(`[craft] ${itemName}: final settle attempt`);
+      await new Promise(r => setTimeout(r, 5000));
+      const t3 = findCraftingTable() || table; const rs3 = bot.recipesFor(item.id, null, 1, t3) || [];
+      if (rs3.length) { try { await bot.craft(rs3[0], count, t3 || undefined); } catch (e) { console.log(`[craft] ${itemName} final attempt failed: ${e.message}`); } }
       for (let i = 0; i < 8 && countItem(itemName) <= beforeCount; i++) await new Promise(r => setTimeout(r, 1000));
     }
     console.log(`[craft] ${itemName}: ${beforeCount} -> ${countItem(itemName)}`);
@@ -459,6 +481,8 @@ async function soloSurvival() {
     await step('作業台を作る', async () => { if (countItem('crafting_table') === 0 && !await craftItem('crafting_table', 1)) throw new Error('作業台クラフト失敗'); });
     await step('棒を作る', async () => { if (!await craftItem('stick', 1)) throw new Error('棒クラフト失敗'); });
     await step('作業台を置く', async () => {
+      // A table placed earlier may already stand nearby; check before demanding one in inventory.
+      if (findCraftingTable()) return;
       // inventory sync can lag right after crafting; re-check a few times
       for (let i = 0; i < 3 && !bot.inventory.items().some(it => it.name === 'crafting_table'); i++) await new Promise(r => setTimeout(r, 1000));
       if (!bot.inventory.items().some(i => i.name === 'crafting_table')) throw new Error('作業台がない');
