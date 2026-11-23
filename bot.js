@@ -31,7 +31,12 @@ for (const cfg of BODIES) {
 function wireLifecycle(ctx, cfg) {
   const { bot, S, Movements } = ctx;
   bot.once('spawn', () => {
-    try { bot.pathfinder.setMovements(new Movements(bot)); } catch {}
+    // canDig MUST stay false: with the default (true) the pathfinder
+    // breaks blocks to shorten its path — it was digging bot-sized
+    // holes through the hut walls instead of using the door, which
+    // the damage watcher kept recording as mystery destruction
+    // (evidence 2026-11-24). All real digging is explicit bot.dig.
+    try { const mv = new Movements(bot); mv.canDig = false; bot.pathfinder.setMovements(mv); } catch {}
     ctx.setupStateMachine(); ctx.startViewer(); ctx.startStateServer();
     ctx.say(cfg.primary ? 'むぜ、来たよ' : 'ゆめ、来たよ');
     console.log(`spawned as ${cfg.username} at ${bot.entity.position}`);
