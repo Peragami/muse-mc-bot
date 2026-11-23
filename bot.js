@@ -499,12 +499,14 @@ async function pickaxeMission() {
     say('木のツルハシを作るね');
     await step('木を探して原木を掘る', async () => {
       const countLogs = () => bot.inventory.items().filter(i => LOG_TYPES.includes(i.name)).reduce((a, i) => a + i.count, 0);
-      await collectByNames(LOG_TYPES, 3, '原木');
+      // 5 logs, not 3: on this slow CT a lagged craft can double-craft the table
+      // (observed live: 2 tables ate 8 planks and the pickaxe starved at 2 planks).
+      await collectByNames(LOG_TYPES, 5, '原木');
       for (const [dx, dz] of [[20, 0], [-20, 10], [10, -20], [-15, -15]]) {
         if (countLogs() > 0 || soloAbort) break;
         console.log(`[pickaxe] no logs yet, relocating by (${dx},${dz}) and retrying`);
         try { const p = bot.entity.position; await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + dx, p.y, p.z + dz, 2)), 45000, 'relocate'); } catch (e) { console.log('[pickaxe] relocate:', e.message); }
-        await collectByNames(LOG_TYPES, 3, '原木');
+        await collectByNames(LOG_TYPES, 5, '原木');
       }
       if (!countLogs()) throw new Error('原木が1個も集まらなかった');
     });
@@ -514,15 +516,31 @@ async function pickaxeMission() {
       const nLogs = countItem(log.name);
       for (let i = 0; i < nLogs; i++) { if (!await craftItem(plank, 1)) { if (countItem(plank) >= 4) break; throw new Error('板材クラフト失敗'); } }
     });
-    await step('作業台を作る', async () => { if (countItem('crafting_table') === 0 && !await craftItem('crafting_table', 1)) throw new Error('作業台クラフト失敗'); });
-    await step('棒を作る', async () => { if (!await craftItem('stick', 1)) throw new Error('棒クラフト失敗'); });
+    await step('作業台を作る', async () => { if (countItem('crafting_table') === 0 && !findCraftingTable() && !await craftItem('crafting_table', 1)) throw new Error('作業台クラフト失敗'); });
+    await step('棒を作る', async () => { if (countItem('stick') < 2 && !await craftItem('stick', 1)) throw new Error('棒クラフト失敗'); });
     await step('作業台を置く', async () => {
       for (let i = 0; i < 3 && !bot.inventory.items().some(it => it.name === 'crafting_table'); i++) await new Promise(r => setTimeout(r, 1000));
       if (!bot.inventory.items().some(i => i.name === 'crafting_table')) throw new Error('作業台がない');
       if (findCraftingTable()) return;
       await placeItemOnGround('crafting_table');
     });
-    await step('木のツルハシを作る', async () => { if (countItem('wooden_pickaxe') === 0 && !await craftItem('wooden_pickaxe', 1)) throw new Error('木ピッケル失敗'); });
+    await step('木のツルハシを作る', async () => {
+      if (countItem('wooden_pickaxe') > 0) return;
+      // Top planks back up to >=3 before the pickaxe craft: convert leftover logs,
+      // or go gather 2 more logs (the table double-craft can starve this step).
+      const countPlanks = () => bot.inventory.items().filter(i => i.name.endsWith('_planks')).reduce((a, i) => a + i.count, 0);
+      for (let round = 0; round < 2 && countPlanks() < 3; round++) {
+        const lg = bot.inventory.items().find(i => LOG_TYPES.includes(i.name));
+        if (lg) { await craftItem(PLANK_OF[lg.name], 1); }
+        else {
+          await collectByNames(LOG_TYPES, 2, '原木');
+          const lg2 = bot.inventory.items().find(i => LOG_TYPES.includes(i.name));
+          if (lg2) await craftItem(PLANK_OF[lg2.name], 1);
+        }
+      }
+      if (countPlanks() < 3) throw new Error('板材が3枚に届かない');
+      if (!await craftItem('wooden_pickaxe', 1)) throw new Error('木ピッケル失敗');
+    });
     const pick = bot.inventory.items().find(i => i.name === 'wooden_pickaxe');
     if (pick) { try { await bot.equip(pick, 'hand'); } catch {} }
     say('木のツルハシ、完成！');
