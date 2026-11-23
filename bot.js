@@ -119,6 +119,11 @@ const chatQueue = [];
 setInterval(() => { const m = chatQueue.shift(); if (m !== undefined) { try { bot.chat(m); } catch {} } }, 1150);
 function say(msg) { console.log(`[chat-out] ${msg}`); chatQueue.push(msg); }
 function fail(prefix, e) { console.log(`[error] ${prefix}: ${e && e.message || e}`); say(`${prefix}: ${(e && e.message || e).toString().slice(0, 80)}`); }
+// ---- log ring buffer + current activity (dashboard status panel) ----
+const logBuf = [];
+const _origLog = console.log.bind(console);
+console.log = (...a) => { try { logBuf.push(new Date().toISOString().slice(11, 19) + ' ' + a.map(x => typeof x === 'string' ? x : (x && x.message) || JSON.stringify(x)).join(' ')); if (logBuf.length > 80) logBuf.shift(); } catch {} _origLog(...a); };
+let autoLabel = '';
 const LOG_TYPES = ['oak_log','birch_log','spruce_log','jungle_log','acacia_log','dark_oak_log','mangrove_log','cherry_log'];
 const PLANK_OF = { oak_log:'oak_planks', birch_log:'birch_planks', spruce_log:'spruce_planks', jungle_log:'jungle_planks', acacia_log:'acacia_planks', dark_oak_log:'dark_oak_planks', mangrove_log:'mangrove_planks', cherry_log:'cherry_planks' };
 const HOSTILES = new Set(['zombie','skeleton','creeper','spider','enderman','witch','pillager','vindicator','drowned','husk','stray','phantom','slime','magma_cube','blaze','ghast','piglin','hoglin','ravager','vex','evoker','guardian','elder_guardian','shulker','silverfish','endermite','cave_spider','zombie_villager','zombified_piglin','piglin_brute','warden','bogged','breeze']);
@@ -139,6 +144,40 @@ function stopAll(reason = 'とまった') {
 }
 function withTimeout(promise, ms, label) {
   return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error(`${label} timeout ${ms / 1000}s`)), ms))]);
+}
+// goto with a progress watchdog. On this slow server a goto can silently stop
+// making progress (goal cancelled by another behavior, pathological start
+// cell). If the bot has not moved for 6s while the goto is still pending,
+// cancel it, walk forward manually for ~2s to break out, then retry once.
+async function gotoWatched(goal, timeoutMs, label) {
+  const { Vec3 } = require('vec3');
+  let lastErr = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    let lastPos = bot.entity ? bot.entity.position.clone() : null;
+    let lastMoveAt = Date.now();
+    let settled = false;
+    const watcher = setInterval(() => {
+      try {
+        if (!bot.entity || settled) return;
+        if (bot.entity.position.distanceTo(lastPos) > 1) { lastPos = bot.entity.position.clone(); lastMoveAt = Date.now(); return; }
+        if (Date.now() - lastMoveAt > 6000) {
+          console.log(`[goto] ${label}: no progress for 6s — cancelling and nudging`);
+          try { bot.pathfinder.setGoal(null); } catch {}
+          try {
+            bot.lookAt(new Vec3(goal.x, bot.entity.position.y + 1.6, goal.z), false).catch(() => {});
+            bot.setControlState('forward', true); bot.setControlState('jump', true);
+            setTimeout(() => { try { bot.setControlState('jump', false); } catch {} }, 500);
+            setTimeout(() => { try { bot.clearControlStates(); } catch {} }, 2000);
+          } catch {}
+          lastMoveAt = Date.now();
+        }
+      } catch {}
+    }, 1000);
+    try { await withTimeout(bot.pathfinder.goto(goal), timeoutMs, label); settled = true; return true; }
+    catch (e) { settled = true; lastErr = e; console.log(`[goto] ${label}: attempt ${attempt + 1} failed: ${e.message}`); await new Promise(r => setTimeout(r, 2300)); }
+    finally { clearInterval(watcher); try { bot.clearControlStates(); } catch {} }
+  }
+  throw lastErr || new Error(`${label} failed`);
 }
 // If a hostile is close, fight back with the best tool in hand before continuing.
 // Night deaths during long steps were the top mission-abort cause.
@@ -303,6 +342,198 @@ async function fishLoop() {
   console.log('[fish] stopped');
 }
 
+// ---- base building + home ----
+const REPLACEABLE_CELLS = new Set(['air', 'cave_air', 'void_air', 'short_grass', 'grass', 'tall_grass', 'fern', 'large_fern', 'snow', 'dandelion', 'poppy', 'oxeye_daisy', 'azure_bluet', 'dead_bush']);
+// Place one block of itemName at the exact cell (x,y,z), using any solid
+// neighbour as the reference. Moves closer first when out of reach.
+async function placeBlockAt(x, y, z, itemName) {
+  const { Vec3 } = require('vec3');
+  const target = new Vec3(x, y, z);
+  const cell = bot.blockAt(target);
+  if (cell && cell.name === itemName) return true;
+  if (cell && !REPLACEABLE_CELLS.has(cell.name)) return false;
+  const item = bot.inventory.items().find(i => i.name === itemName);
+  if (!item) throw new Error(`${itemName}不足`);
+  const refs = [
+    { b: bot.blockAt(target.offset(0, -1, 0)), f: new Vec3(0, 1, 0) },
+    { b: bot.blockAt(target.offset(1, 0, 0)), f: new Vec3(-1, 0, 0) },
+    { b: bot.blockAt(target.offset(-1, 0, 0)), f: new Vec3(1, 0, 0) },
+    { b: bot.blockAt(target.offset(0, 0, 1)), f: new Vec3(0, 0, -1) },
+    { b: bot.blockAt(target.offset(0, 0, -1)), f: new Vec3(0, 0, 1) },
+    { b: bot.blockAt(target.offset(0, 1, 0)), f: new Vec3(0, -1, 0) },
+  ];
+  const ref = refs.find(r => r.b && r.b.boundingBox === 'block');
+  if (!ref) { console.log(`[build] no reference block for ${itemName} at ${x},${y},${z}`); return false; }
+  if (bot.entity.position.distanceTo(target.offset(0.5, 0.5, 0.5)) > 4) {
+    try { await gotoWatched(new goals.GoalNear(x, y, z, 3), 15000, 'build move'); } catch {}
+  }
+  try { await bot.equip(item, 'hand'); } catch {}
+  try { await withTimeout(bot.placeBlock(ref.b, ref.f), 10000, 'placeBlock'); } catch (e) { console.log(`[build] place ${itemName} at ${x},${y},${z}: ${e.message}`); return false; }
+  await new Promise(r => setTimeout(r, 350));
+  const after = bot.blockAt(target);
+  return !!after && after.name === itemName;
+}
+function groundYAt(x, z, refY) {
+  const { Vec3 } = require('vec3');
+  for (let y = refY + 14; y > refY - 16; y--) { const b = bot.blockAt(new Vec3(x, y, z)); if (b && b.boundingBox === 'block') return y; }
+  return -1;
+}
+// Smelt logs into charcoal with a placed furnace (for torches).
+async function smeltCharcoal(n) {
+  const fpos = findBlocks(['furnace'], 16, 1)[0];
+  if (!fpos) throw new Error('かまどが見つからない');
+  const block = bot.blockAt(fpos);
+  const furnace = await bot.openFurnace(block);
+  try {
+    const fuel = bot.inventory.items().find(i => i.name.endsWith('_planks')) || bot.inventory.items().find(i => LOG_TYPES.includes(i.name));
+    if (!fuel) throw new Error('燃料がない');
+    await furnace.putFuel(fuel.type, null, 3);
+    const log = bot.inventory.items().find(i => LOG_TYPES.includes(i.name));
+    if (!log) throw new Error('原木がない');
+    await furnace.putInput(log.type, null, n);
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      const out = furnace.outputItem();
+      if (out && out.count >= n) break;
+      if (soloAbort) break;
+    }
+    const out = furnace.outputItem();
+    if (out) await furnace.takeOutput();
+    await new Promise(r => setTimeout(r, 800));
+  } finally { try { if (furnace.close) furnace.close(); else bot.closeWindow(furnace.window); } catch {} }
+  return countItem('charcoal');
+}
+let baseMode = false;
+async function buildBase() {
+  if (baseMode) { say('もう作ってるよ'); return; }
+  baseMode = true; soloAbort = false; nightMode = false;
+  say('拠点を作るね。まず材料を集めるよ');
+  try {
+    // 1) logs (keep 5 unconverted for charcoal)
+    let logs = LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
+    if (logs < 26) {
+      await collectByNames(LOG_TYPES, 26 - logs, '原木', 48);
+      logs = LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
+      if (logs < 14) { // relocate once and retry
+        const p = bot.entity.position; desiredState = 'busy';
+        try { await gotoWatched(new goals.GoalNear(p.x + 25, p.y, p.z + 10, 3), 30000, 'relocate for logs'); } catch {}
+        if (desiredState === 'busy') desiredState = 'idle';
+        await collectByNames(LOG_TYPES, 26 - logs, '原木', 48);
+        logs = LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
+      }
+      if (logs < 14) { say('原木が足りなくて拠点は無理だった'); return; }
+    }
+    // 2) wooden pickaxe (for cobblestone)
+    if (!bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) { await pickaxeMission(); }
+    if (soloAbort) return;
+    // 3) cobblestone for a furnace
+    if (countItem('cobblestone') < 8) await mineStoneManual(8 - countItem('cobblestone'));
+    if (soloAbort) return;
+    // 4) mass-convert logs to planks (keep 5 logs)
+    const plankOf = {}; for (const t of LOG_TYPES) plankOf[t] = PLANK_OF[t];
+    let keep = 5;
+    for (const t of LOG_TYPES) {
+      while (countItem(t) > 0 && LOG_TYPES.reduce((a, x) => a + countItem(x), 0) > keep) {
+        const ok = await craftItem(plankOf[t], 1);
+        if (!ok) break;
+        if (soloAbort) return;
+      }
+    }
+    const plankType = Object.values(PLANK_OF).map(pn => ({ pn, c: countItem(pn) })).sort((a, b) => b.c - a.c)[0];
+    if (!plankType || plankType.c < 70) { say(`板材が足りない（${plankType ? plankType.c : 0}枚）ので中止するね`); return; }
+    const planks = plankType.pn;
+    console.log(`[base] building with ${planks} x${plankType.c}`);
+    // 5) crafts: furnace, sticks+charcoal+torches, door, chest, table, bed?
+    if (countItem('crafting_table') === 0 && !findCraftingTable()) await craftItem('crafting_table', 1);
+    if (countItem('furnace') === 0) await craftItem('furnace', 1);
+    if (countItem('stick') < 4) await craftItem('stick', 1);
+    if (countItem('furnace') > 0) {
+      try { await placeItemOnGround('furnace'); await new Promise(r => setTimeout(r, 600)); if (countItem('charcoal') < 4) await smeltCharcoal(4); } catch (e) { console.log('[base] charcoal failed:', e.message); }
+    }
+    if (countItem('charcoal') >= 1 && countItem('stick') >= 1 && countItem('torch') < 4) await craftItem('torch', 1);
+    const doorName = planks.replace('_planks', '_door');
+    if (countItem(doorName) === 0) await craftItem(doorName, 1);
+    if (countItem('chest') === 0) await craftItem('chest', 1);
+    let bedName = null;
+    if (countItem('white_wool') >= 3) { if (await craftItem('white_bed', 1)) bedName = 'white_bed'; }
+    if (soloAbort) return;
+    // 6) pick a flat 5x5 site near here
+    const bp = bot.entity.position;
+    let site = null;
+    for (const [ox, oz] of [[0, 0], [6, 0], [-6, 0], [0, 6], [0, -6], [10, 10], [-10, -10], [12, -6], [-12, 6]]) {
+      const cx = Math.floor(bp.x) + ox, cz = Math.floor(bp.z) + oz;
+      const ys = [];
+      for (let x = cx; x < cx + 5; x++) for (let z = cz; z < cz + 5; z++) ys.push(groundYAt(x, z, Math.floor(bp.y)));
+      if (ys.some(y => y < 0)) continue;
+      const mn = Math.min(...ys), mx = Math.max(...ys);
+      if (mx - mn <= 1) { site = { ox: cx, oz: cz, baseY: mx }; break; }
+    }
+    if (!site) { say('平らな場所が見つからなくて建てられなかった'); return; }
+    const { ox, oz, baseY } = site;
+    console.log(`[base] site at ${ox},${baseY},${oz}`);
+    say(`場所が決まった（${ox}, ${baseY}, ${oz}）。建てるね`);
+    desiredState = 'busy';
+    // 7) foundation fill + walls (door gap on the south side, center)
+    const doorX = ox + 2, doorZ = oz + 4;
+    for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) {
+      const isPerim = x === ox || x === ox + 4 || z === oz || z === oz + 4;
+      if (!isPerim) continue;
+      const gy = groundYAt(x, z, baseY);
+      for (let y = gy + 1; y <= baseY; y++) await placeBlockAt(x, y, z, planks);
+    }
+    for (let row = 1; row <= 3; row++) {
+      for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) {
+        const isPerim = x === ox || x === ox + 4 || z === oz || z === oz + 4;
+        if (!isPerim) continue;
+        if (x === doorX && z === doorZ && row <= 2) continue; // doorway
+        await placeBlockAt(x, baseY + row, z, planks);
+        if (soloAbort) break;
+      }
+      if (soloAbort) break;
+    }
+    if (soloAbort) return;
+    // 8) step inside, then roof
+    try { await gotoWatched(new goals.GoalNear(ox + 2, baseY + 1, oz + 2, 1), 30000, 'enter base'); } catch (e) { console.log('[base] enter failed:', e.message); }
+    for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) { await placeBlockAt(x, baseY + 4, z, planks); if (soloAbort) break; }
+    if (soloAbort) return;
+    // 9) door, furniture, torches
+    if (countItem(doorName) > 0) await placeBlockAt(doorX, baseY + 1, doorZ, doorName);
+    try { if (countItem('crafting_table') > 0) await placeItemOnGround('crafting_table'); } catch {}
+    try { if (countItem('chest') > 0) await placeItemOnGround('chest'); } catch {}
+    if (countItem('torch') > 0) { await placeBlockAt(ox + 2, baseY + 2, oz + 3, 'torch'); }
+    if (countItem('torch') > 0) { await placeBlockAt(ox + 2, baseY + 2, oz + 1, 'torch'); }
+    if (bedName && countItem(bedName) > 0) { try { await placeItemOnGround(bedName); } catch {} }
+    if (desiredState === 'busy') desiredState = 'idle';
+    // 10) register home
+    settings.home = { x: ox + 2, y: baseY + 1, z: oz + 2 };
+    saveSettings();
+    console.log(`[base] done. home=${JSON.stringify(settings.home)}`);
+    say(`拠点ができたよ（${settings.home.x}, ${settings.home.y}, ${settings.home.z}）。夜はここに帰るね`);
+  } catch (e) { console.log('[base] failed:', e.message); say('拠点づくりに失敗しちゃった'); }
+  finally { baseMode = false; if (desiredState === 'busy') desiredState = 'idle'; }
+}
+function closeDoorNear() {
+  try {
+    const doors = findBlocks(['oak_door', 'birch_door', 'spruce_door', 'jungle_door', 'acacia_door', 'dark_oak_door', 'mangrove_door', 'cherry_door', 'iron_door'], 6, 4);
+    for (const p of doors) {
+      const b = bot.blockAt(p); if (!b) continue;
+      const props = b.getProperties ? b.getProperties() : {};
+      if (props.open === 'true' || props.open === true) { bot.activateBlock(b); console.log('[home] closed the door'); }
+    }
+  } catch {}
+}
+// Walk back to the registered base. Caller owns desiredState ('busy').
+async function goHome() {
+  if (!settings.home || !bot.entity) return false;
+  const home = settings.home;
+  const { Vec3 } = require('vec3');
+  try {
+    await gotoWatched(new goals.GoalNear(home.x, home.y, home.z, 1), 90000, 'go home');
+    closeDoorNear();
+    return bot.entity.position.distanceTo(new Vec3(home.x, home.y, home.z)) < 4;
+  } catch (e) { console.log('[home] goHome failed:', e.message); return false; }
+}
+
 // ---- craft helper ----
 const JP_CRAFT = { '木のツルハシ':'wooden_pickaxe','石のツルハシ':'stone_pickaxe','作業台':'crafting_table','棒':'stick','松明':'torch','つるはし':'wooden_pickaxe','ツルハシ':'wooden_pickaxe' };
 function findCraftingTable() { const pos = findBlocks(['crafting_table'], 16, 1); return pos.length ? bot.blockAt(pos[0]) : null; }
@@ -413,6 +644,21 @@ async function goSleep() {
 // ---- chest / give ----
 const DEPOSIT_KEEP = (name) => /(_pickaxe|_axe|_sword|_shovel|_hoe)$/.test(name) || name === 'fishing_rod';
 function isFood(name) { try { const f = bot.registry.foodsByName; return !!(f && f[name]); } catch { return false; } }
+// Eat the best food first; rotten flesh (hunger risk) is the last resort.
+const FOOD_ORDER = ['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_salmon', 'cooked_cod', 'bread', 'baked_potato', 'pumpkin_pie', 'carrot', 'golden_carrot', 'apple', 'melon_slice', 'sweet_berries', 'glow_berries', 'beef', 'porkchop', 'mutton', 'chicken', 'cod', 'salmon', 'potato', 'rotten_flesh', 'spider_eye'];
+function bestFoodItem() {
+  if (!bot.inventory) return null;
+  const items = bot.inventory.items();
+  for (const n of FOOD_ORDER) { const it = items.find(i => i.name === n); if (it) return it; }
+  return items.find(i => isFood(i.name)) || null;
+}
+const PREY = new Set(['cow', 'pig', 'sheep', 'chicken', 'rabbit', 'mooshroom']);
+function nearestPrey(range = 24) {
+  if (!bot.entity) return null;
+  const es = Object.values(bot.entities).filter(e => e && e !== bot.entity && e.position && PREY.has(e.name) && bot.entity.position.distanceTo(e.position) <= range);
+  es.sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position));
+  return es[0] || null;
+}
 async function depositToChest() {
   const pos = findBlocks(['chest','trapped_chest'], 32, 1);
   if (!pos.length) { say('近くにチェストが見つからない'); return; }
@@ -884,11 +1130,12 @@ function startViewer() {
 const fs2 = require('fs');
 const path2 = require('path');
 const SETTINGS_PATH = path2.join(__dirname, 'settings.json');
-const settings = { autoEat: true, autoFight: true, autoPickup: true, nightSurvival: true, autoRecover: true };
+const settings = { autoEat: true, autoFight: true, autoPickup: true, nightSurvival: true, autoRecover: true, autoEquip: true, home: null };
 function loadSettings() {
   try {
     const j = JSON.parse(fs2.readFileSync(SETTINGS_PATH, 'utf8'));
     for (const k of Object.keys(settings)) if (typeof j[k] === 'boolean') settings[k] = j[k];
+    if (j.home && typeof j.home.x === 'number' && typeof j.home.y === 'number' && typeof j.home.z === 'number') settings.home = { x: j.home.x, y: j.home.y, z: j.home.z };
   } catch {}
   console.log('[settings] loaded:', JSON.stringify(settings));
 }
@@ -900,18 +1147,44 @@ loadSettings();
 // ---- auto behaviors (dashboard-toggleable) ----
 let autoBusy = false;
 let lastEatAt = 0;
+let lastEquipAt = 0;
+let lastHuntAt = 0;
 setInterval(async () => {
   try {
     if (!bot.entity || !bot.inventory || autoBusy) return;
+    // Keep the best armor worn (checked every 30s while idle).
+    if (settings.autoEquip && !anyMissionActive() && !nightMode && Date.now() - lastEquipAt > 30000) {
+      lastEquipAt = Date.now();
+      try { await bot.armorManager.equipAll(); } catch {}
+    }
     // Eat when hungry (health only regens while fed). 15s cooldown.
     if (settings.autoEat && bot.food <= 14 && Date.now() - lastEatAt > 15000) {
-      const food = bot.inventory.items().find(i => isFood(i.name));
+      const food = bestFoodItem();
       if (food) {
-        autoBusy = true; lastEatAt = Date.now();
+        autoBusy = true; autoLabel = '食事中'; lastEatAt = Date.now();
         console.log(`[auto] eating ${food.name} (food=${bot.food})`);
         try { await bot.equip(food, 'hand'); await bot.consume(); } catch (e) { console.log('[auto] eat failed:', e.message); }
-        autoBusy = false;
+        autoBusy = false; autoLabel = '';
         return;
+      }
+    }
+    // No food at all and getting hungry: hunt a nearby passive animal.
+    if (settings.autoEat && !anyMissionActive() && !nightMode && Date.now() - lastHuntAt > 60000) {
+      const foodCount = bot.inventory.items().filter(i => isFood(i.name)).reduce((a, i) => a + i.count, 0);
+      if (foodCount === 0 && bot.food <= 16) {
+        const prey = nearestPrey(24);
+        if (prey) {
+          lastHuntAt = Date.now();
+          autoBusy = true; autoLabel = '食料を狩り中'; desiredState = 'busy';
+          console.log(`[auto] no food — hunting ${prey.name}`);
+          say('食べ物がないから狩ってくるね');
+          const weapon = bot.inventory.items().find(i => i.name.endsWith('_sword')) || bot.inventory.items().find(i => i.name.endsWith('_axe'));
+          if (weapon) { try { await bot.equip(weapon, 'hand'); } catch {} }
+          try { await withTimeout(bot.pvp.attack(prey), 20000, 'hunt'); } catch (e) { console.log('[auto] hunt failed:', e.message); }
+          if (desiredState === 'busy') desiredState = 'idle';
+          autoBusy = false; autoLabel = '';
+          return; // the drops are collected by the pickup branch on later ticks
+        }
       }
     }
     // Fight hostiles that come close (not during missions: checkDanger covers
@@ -919,13 +1192,33 @@ setInterval(async () => {
     if (settings.autoFight && !anyMissionActive() && !nightMode) {
       const h = nearestHostile(8);
       if (h) {
-        autoBusy = true; desiredState = 'busy';
+        // Survival first: at low health, do not start a fight bare-handed —
+        // fall back and eat to regen. (A 17hp fist-fight vs husk+enderman
+        // killed the bot in the 2026-11-23 live test.)
+        if (bot.health <= 8) {
+          autoBusy = true; autoLabel = '撤退中'; desiredState = 'busy';
+          console.log(`[auto] health low (${bot.health}) — retreating from ${h.name}`);
+          say('体力が少ないから逃げるね');
+          try {
+            const p = bot.entity.position;
+            await gotoWatched(new goals.GoalNear(p.x + (p.x - h.position.x) * 2, p.y, p.z + (p.z - h.position.z) * 2, 2), 12000, 'retreat');
+            const food = bestFoodItem();
+            if (food && bot.food < 20) { try { await bot.equip(food, 'hand'); await bot.consume(); lastEatAt = Date.now(); } catch {} }
+          } catch (e) { console.log('[auto] retreat failed:', e.message); }
+          if (desiredState === 'busy') desiredState = 'idle';
+          autoBusy = false; autoLabel = '';
+          return;
+        }
+        autoBusy = true; autoLabel = '戦闘中'; desiredState = 'busy';
         const weapon = bot.inventory.items().find(i => i.name.endsWith('_sword')) || bot.inventory.items().find(i => i.name.endsWith('_axe')) || bot.inventory.items().find(i => i.name.endsWith('_pickaxe'));
         if (weapon) { try { await bot.equip(weapon, 'hand'); } catch {} }
         console.log(`[auto] fighting ${h.name} at ${bot.entity.position.distanceTo(h.position).toFixed(1)}m`);
+        // Abort mid-fight if health crashes.
+        const hpWatch = setInterval(() => { try { if (bot.health <= 5 && bot.pvp) { console.log('[auto] health critical — stopping fight'); if (bot.pvp.forceStop) bot.pvp.forceStop(); else if (bot.pvp.stop) bot.pvp.stop(); } } catch {} }, 500);
         try { await withTimeout(bot.pvp.attack(h), 15000, 'autoFight'); } catch (e) { console.log('[auto] fight gave up:', e.message); }
+        clearInterval(hpWatch);
         if (desiredState === 'busy') desiredState = 'idle';
-        autoBusy = false;
+        autoBusy = false; autoLabel = '';
         return;
       }
     }
@@ -935,15 +1228,15 @@ setInterval(async () => {
       if (drops.length) {
         drops.sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position));
         const d = drops[0];
-        autoBusy = true; desiredState = 'busy';
+        autoBusy = true; autoLabel = 'ドロップ回収中'; desiredState = 'busy';
         console.log(`[auto] picking up drop at ${d.position}`);
-        try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(d.position.x, d.position.y, d.position.z, 1)), 15000, 'autoPickup'); await new Promise(r => setTimeout(r, 600)); } catch (e) { console.log('[auto] pickup failed:', e.message); }
+        try { await gotoWatched(new goals.GoalNear(d.position.x, d.position.y, d.position.z, 1), 20000, 'autoPickup'); await new Promise(r => setTimeout(r, 600)); } catch (e) { console.log('[auto] pickup failed:', e.message); }
         if (desiredState === 'busy') desiredState = 'idle';
-        autoBusy = false;
+        autoBusy = false; autoLabel = '';
         return;
       }
     }
-  } catch (e) { console.log('[auto] tick error:', e.message); autoBusy = false; }
+  } catch (e) { console.log('[auto] tick error:', e.message); autoBusy = false; autoLabel = ''; }
 }, 3000);
 
 // ---- state API + dashboard (only when STATE_PORT set) ----
@@ -973,7 +1266,10 @@ function botState() {
     main: Array.from({ length: 27 }, (_, i) => at(9 + i)),
     hotbar: Array.from({ length: 9 }, (_, i) => at(36 + i)),
     players: Object.keys(bot.players || {}),
-    online: !!bot.entity
+    online: !!bot.entity,
+    activity: nightMode ? (homeWaitMode ? '🏠 拠点で待機中' : '🌙 夜間サバイバル中') : anyMissionActive() ? 'ミッション中' : (autoBusy && autoLabel ? autoLabel : '待機中'),
+    home: settings.home || null,
+    logs: logBuf.slice(-15)
   };
 }
 function startStateServer() {
@@ -1055,9 +1351,10 @@ bot.on('death', () => { try { deathPos = bot.entity.position.clone(); console.lo
 // at night an idle bot keeps moving (zombies cannot catch a walking bot) and
 // fights back at point blank. A death-loop breaker forces this mode on.
 let nightMode = false;
+let homeWaitMode = false;
 let deathTimes = [];
 let firstSpawnSeen = false;
-function anyMissionActive() { return soloMode || pickaxeMode || swordMode || armorMode || fishingMode || guardMode; }
+function anyMissionActive() { return soloMode || pickaxeMode || swordMode || armorMode || fishingMode || guardMode || baseMode; }
 async function nightSurvival() {
   if (nightMode) return;
   nightMode = true;
@@ -1067,6 +1364,28 @@ async function nightSurvival() {
   // goto in this codebase (collectByNames, attackEntity, crafts) runs busy.
   desiredState = 'busy';
   console.log('[night] survival mode start');
+  // With a registered base, going home beats wandering: sealed + lit inside.
+  if (settings.home) {
+    say('夜だから拠点に帰るね');
+    const ok = await goHome().catch(() => false);
+    if (ok && nightMode) {
+      homeWaitMode = true;
+      try {
+        while (nightMode && bot.time && !bot.time.isDay) {
+          const h = nearestHostile(3);
+          if (h) { try { await withTimeout(bot.pvp.attack(h), 6000, 'home defense'); } catch {} }
+          const bedPos = findBlocks(['white_bed', 'red_bed', 'blue_bed', 'black_bed', 'brown_bed', 'cyan_bed', 'gray_bed', 'green_bed', 'light_blue_bed', 'light_gray_bed', 'lime_bed', 'magenta_bed', 'orange_bed', 'pink_bed', 'purple_bed', 'yellow_bed'], 8, 1)[0];
+          if (bedPos) { const bb = bot.blockAt(bedPos); if (bb) { try { await bot.sleep(bb); } catch (e) { console.log('[night] sleep failed:', e.message); } } }
+          await new Promise(r => setTimeout(r, 3000));
+          if (!bot.entity) break;
+        }
+      } finally { homeWaitMode = false; }
+      console.log('[night] home wait end');
+      return;
+    }
+    if (!nightMode) return; // stopped while heading home
+    console.log('[night] could not get home — falling back to wandering');
+  }
   say('夜は危ないから動き回ってやり過ごすね');
   try {
     while (nightMode && bot.time && !bot.time.isDay) {
@@ -1121,7 +1440,7 @@ bot.on('spawn', () => {
         autoBusy = true; // keep the auto tick out of the recovery's pathfinding
         desiredState = 'busy'; // goto only moves while busy (see nightSurvival note)
         try {
-          await withTimeout(bot.pathfinder.goto(new goals.GoalNear(dp.x, dp.y, dp.z, 1)), 60000, 'recover drops');
+          await gotoWatched(new goals.GoalNear(dp.x, dp.y, dp.z, 1), 60000, 'recover drops');
           await new Promise(r => setTimeout(r, 3000));
           console.log('[spawn] drop recovery walk done');
           say('回収できたはず。今の持ち物を確認してね');
@@ -1144,7 +1463,7 @@ bot.on('kicked', (r) => console.log('kicked:', r));
 bot.on('error', (e) => console.log('error:', e.message));
 bot.on('end', (r) => console.log('disconnected:', r));
 
-const HELP = ['ヘルプ: ついてきて/こっちきて/とまれ/木切って/石掘って/鉄掘って/たたかって/まもって/装備して/食べて/もちもの/寝て/釣って/◯◯作って/もどって/預けて/木ちょうだい/一人でサバイバル'];
+const HELP = ['ヘルプ: ついてきて/こっちきて/とまれ/木切って/石掘って/鉄掘って/たたかって/まもって/装備して/食べて/もちもの/寝て/釣って/◯◯作って/もどって/預けて/木ちょうだい/一人でサバイバル/拠点つくって/うちかえる'];
 
 // ---- chat commands ----
 bot.on('chat', async (username, message) => {
@@ -1205,6 +1524,15 @@ bot.on('chat', async (username, message) => {
     }
     if (msg.includes('もちもの') || msg === 'inventory') { const l = invList(); if (!l.length) say('何も持ってない'); else { let buf=''; for (const s of l) { if ((buf+s).length>170){ say(buf); buf=''; } buf += (buf?', ':'')+s; } if (buf) say(buf); } return; }
     const tossMatch = msg.match(/捨てて\s*(\S+)/); if (tossMatch) { const name = JP_ITEMS[tossMatch[1]] || tossMatch[1]; const it = bot.inventory.items().find(i=>i.name===name); if (!it) say('それは持ってない'); else { try { await bot.tossStack(it); say(`${name}を捨てた`);} catch(e){fail('捨てられなかった',e);} } return; }
+    if (msg.includes('拠点つくって') || msg.includes('拠点作って') || msg.includes('家つくって') || msg.includes('家作って')) { if (anyMissionActive()) { say('今は別の作業中'); return; } buildBase(); return; }
+    if (msg.includes('うちかえる') || msg.includes('拠点かえる') || msg.includes('拠点へ帰る') || msg.includes('家かえる')) {
+      if (!settings.home) { say('まだ拠点がない。「拠点つくって」で作るよ'); return; }
+      desiredState = 'busy';
+      const ok = await goHome().catch(() => false);
+      if (desiredState === 'busy') desiredState = 'idle';
+      say(ok ? '拠点に帰ったよ' : '拠点に帰れなかった');
+      return;
+    }
     if (msg.includes('むぜ')) { say('なに？ ヘルプって言うとコマンド一覧出すよ'); return; }
   } catch (e) { fail('コマンド処理で失敗', e); }
 });

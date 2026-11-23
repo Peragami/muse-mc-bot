@@ -79,6 +79,8 @@
   <button data-cmd="木切って">木切って</button>
   <button data-cmd="もちもの">もちもの</button>
   <button data-cmd="一人でサバイバル">一人でサバイバル</button>
+  <button data-cmd="拠点つくって">🏠 拠点つくって</button>
+  <button data-cmd="うちかえる">拠点へ帰る</button>
   <button data-cmd="とまれ">とまれ</button>
   <input id="cmd-input" type="text" placeholder="コマンドを入力（例：木のツルハシ作って）" maxlength="100">
   <button id="cmd-send">送信</button>
@@ -125,14 +127,21 @@
       <div class="row"><span>ゲーム内時刻</span><span id="gtime">—</span></div>
       <div class="row"><span>モード</span><span id="mode">—</span></div>
       <div class="row"><span>オンライン</span><span id="players">—</span></div>
+      <div class="row"><span>現在の行動</span><span id="activity">—</span></div>
+      <div class="row"><span>拠点</span><span id="home">—</span></div>
     </div>
     <div class="settings">
       <h2>設定（自動ですること）</h2>
       <div class="srow"><span>お腹が減ったら自動で食べる</span><label class="switch"><input type="checkbox" id="set-autoEat"><span class="track"></span></label></div>
       <div class="srow"><span>近くのモンスターを自動で倒す</span><label class="switch"><input type="checkbox" id="set-autoFight"><span class="track"></span></label></div>
       <div class="srow"><span>ドロップ品を自動で拾いに行く</span><label class="switch"><input type="checkbox" id="set-autoPickup"><span class="track"></span></label></div>
-      <div class="srow"><span>夜は動き回ってやり過ごす</span><label class="switch"><input type="checkbox" id="set-nightSurvival"><span class="track"></span></label></div>
+      <div class="srow"><span>夜は拠点に帰る（なければ動き回る）</span><label class="switch"><input type="checkbox" id="set-nightSurvival"><span class="track"></span></label></div>
       <div class="srow"><span>死んだら落下物を取りに戻る</span><label class="switch"><input type="checkbox" id="set-autoRecover"><span class="track"></span></label></div>
+      <div class="srow"><span>防具を自動で装備する</span><label class="switch"><input type="checkbox" id="set-autoEquip"><span class="track"></span></label></div>
+    </div>
+    <div class="info">
+      <h2>ログ（最新15件）</h2>
+      <div id="logs" style="font-size:11px;line-height:1.5;color:#bdbdc7;word-break:break-all;">—</div>
     </div>
   </div>
   <div class="right">
@@ -199,6 +208,11 @@
       $('v-day').textContent = s.isDay ? '☀ 昼' : '🌙 夜';
       $('mode').textContent = s.gameMode || '—';
       $('players').textContent = s.players.join(', ') || '—';
+      $('activity').textContent = s.activity || '—';
+      $('home').textContent = s.home ? ('X ' + s.home.x + ' / Y ' + s.home.y + ' / Z ' + s.home.z) : 'なし';
+      if (Array.isArray(s.logs)) {
+        $('logs').innerHTML = s.logs.map(l => l.replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('<br>');
+      }
     } catch (e) {
       $('conn').innerHTML = '<span class="err">状態APIに接続できません</span>';
     }
@@ -215,7 +229,7 @@
   document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => sendCmd(b.dataset.cmd)));
   $('cmd-send').addEventListener('click', () => { sendCmd($('cmd-input').value); $('cmd-input').value = ''; });
   $('cmd-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sendCmd($('cmd-input').value); $('cmd-input').value = ''; } });
-  const SETTING_KEYS = ['autoEat', 'autoFight', 'autoPickup', 'nightSurvival', 'autoRecover'];
+  const SETTING_KEYS = ['autoEat', 'autoFight', 'autoPickup', 'nightSurvival', 'autoRecover', 'autoEquip'];
   async function loadSettings() {
     try {
       const r = await fetch('/api/settings', { cache: 'no-store' });
