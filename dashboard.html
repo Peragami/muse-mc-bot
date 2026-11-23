@@ -51,6 +51,11 @@
   .hotbar-strip .slot.sel { border-color: #ffffff; box-shadow: 0 0 0 2px #fff, 0 0 10px #fff; z-index: 1; }
   .hotbar-strip .slot .nm { font-size: 9px; }
   .err { color: #e5484d; font-size: 12px; }
+  .cmdbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; background: #26262e; border: 1px solid #3a3a44; padding: 8px; margin-bottom: 12px; }
+  .cmdbar button { background: #3a3a44; color: #e8e8e8; border: 1px solid #55555f; padding: 6px 10px; font-size: 13px; cursor: pointer; border-radius: 4px; }
+  .cmdbar button:hover { background: #4a4a56; }
+  .cmdbar input { flex: 1; min-width: 140px; background: #1b1b21; color: #e8e8e8; border: 1px solid #55555f; padding: 6px 8px; font-size: 13px; border-radius: 4px; }
+  .cmdbar .sent { font-size: 12px; color: #7ee24a; }
 </style>
 </head>
 <body>
@@ -59,6 +64,16 @@
   <h1>むぜ ダッシュボード</h1>
   <span id="conn" style="font-size:12px;color:#9a9aa5;">接続中…</span>
 </header>
+<div class="cmdbar">
+  <button data-cmd="木のツルハシ作って">🪓 木のツルハシ作って</button>
+  <button data-cmd="木切って">木切って</button>
+  <button data-cmd="もちもの">もちもの</button>
+  <button data-cmd="一人でサバイバル">一人でサバイバル</button>
+  <button data-cmd="とまれ">とまれ</button>
+  <input id="cmd-input" type="text" placeholder="コマンドを入力（例：木のツルハシ作って）" maxlength="100">
+  <button id="cmd-send">送信</button>
+  <span class="sent" id="cmd-sent"></span>
+</div>
 <div class="layout">
   <div class="left">
     <div class="gui">
@@ -170,6 +185,18 @@
       $('conn').innerHTML = '<span class="err">状態APIに接続できません</span>';
     }
   }
+  async function sendCmd(text) {
+    const cmd = (text || '').trim();
+    if (!cmd) return;
+    try {
+      const r = await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: cmd }) });
+      $('cmd-sent').textContent = r.ok ? ('送信: ' + cmd) : '送信に失敗';
+    } catch (e) { $('cmd-sent').textContent = '送信に失敗'; }
+    setTimeout(() => { $('cmd-sent').textContent = ''; }, 4000);
+  }
+  document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => sendCmd(b.dataset.cmd)));
+  $('cmd-send').addEventListener('click', () => { sendCmd($('cmd-input').value); $('cmd-input').value = ''; });
+  $('cmd-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sendCmd($('cmd-input').value); $('cmd-input').value = ''; } });
   tick(); setInterval(tick, 1500);
 </script>
 </body>

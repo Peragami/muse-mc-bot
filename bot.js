@@ -482,6 +482,59 @@ async function soloSurvival() {
   }
 }
 
+// ---- wooden pickaxe mission (solo's opening chain, stops at the pickaxe) ----
+let pickaxeMode = false;
+async function pickaxeMission() {
+  if (pickaxeMode) { say('もうツルハシを作ってる途中だよ'); return; }
+  if (countItem('wooden_pickaxe') > 0) { say('木のツルハシはもう持ってるよ'); const p = bot.inventory.items().find(i => i.name === 'wooden_pickaxe'); try { await bot.equip(p, 'hand'); } catch {} return; }
+  pickaxeMode = true; soloAbort = false;
+  const started = Date.now(); const LIMIT = 6 * 60 * 1000;
+  const step = async (label, fn) => {
+    if (soloAbort) throw new Error('stopped');
+    if (Date.now() - started > LIMIT) throw new Error('timeout');
+    say(label); console.log(`[pickaxe] ${label}`);
+    await fn(); console.log(`[pickaxe] OK: ${label}`);
+  };
+  try {
+    say('木のツルハシを作るね');
+    await step('木を探して原木を掘る', async () => {
+      const countLogs = () => bot.inventory.items().filter(i => LOG_TYPES.includes(i.name)).reduce((a, i) => a + i.count, 0);
+      await collectByNames(LOG_TYPES, 3, '原木');
+      for (const [dx, dz] of [[20, 0], [-20, 10], [10, -20], [-15, -15]]) {
+        if (countLogs() > 0 || soloAbort) break;
+        console.log(`[pickaxe] no logs yet, relocating by (${dx},${dz}) and retrying`);
+        try { const p = bot.entity.position; await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + dx, p.y, p.z + dz, 2)), 45000, 'relocate'); } catch (e) { console.log('[pickaxe] relocate:', e.message); }
+        await collectByNames(LOG_TYPES, 3, '原木');
+      }
+      if (!countLogs()) throw new Error('原木が1個も集まらなかった');
+    });
+    await step('原木を板材にする', async () => {
+      const log = bot.inventory.items().find(i => LOG_TYPES.includes(i.name));
+      if (!log) throw new Error('原木がない'); const plank = PLANK_OF[log.name];
+      const nLogs = countItem(log.name);
+      for (let i = 0; i < nLogs; i++) { if (!await craftItem(plank, 1)) { if (countItem(plank) >= 4) break; throw new Error('板材クラフト失敗'); } }
+    });
+    await step('作業台を作る', async () => { if (countItem('crafting_table') === 0 && !await craftItem('crafting_table', 1)) throw new Error('作業台クラフト失敗'); });
+    await step('棒を作る', async () => { if (!await craftItem('stick', 1)) throw new Error('棒クラフト失敗'); });
+    await step('作業台を置く', async () => {
+      for (let i = 0; i < 3 && !bot.inventory.items().some(it => it.name === 'crafting_table'); i++) await new Promise(r => setTimeout(r, 1000));
+      if (!bot.inventory.items().some(i => i.name === 'crafting_table')) throw new Error('作業台がない');
+      if (findCraftingTable()) return;
+      await placeItemOnGround('crafting_table');
+    });
+    await step('木のツルハシを作る', async () => { if (countItem('wooden_pickaxe') === 0 && !await craftItem('wooden_pickaxe', 1)) throw new Error('木ピッケル失敗'); });
+    const pick = bot.inventory.items().find(i => i.name === 'wooden_pickaxe');
+    if (pick) { try { await bot.equip(pick, 'hand'); } catch {} }
+    say('木のツルハシ、完成！');
+    console.log('[pickaxe] MISSION COMPLETE');
+  } catch (e) { console.log('[pickaxe] aborted:', e.message); say(`ツルハシ作り中断: ${e.message}`); }
+  finally {
+    pickaxeMode = false;
+    const inv = invList().join(', ') || 'なし';
+    console.log(`[pickaxe] finished inventory: ${inv}`); say(`今の持ち物: ${inv.slice(0, 170)}`);
+  }
+}
+
 // ---- iron sword mission (think-and-do: full chain from empty inventory) ----
 // Chain: logs -> planks/table/sticks -> wooden pick -> cobble x11 -> stone pick +
 // furnace -> dig down scanning for iron ore -> mine raw iron -> smelt -> iron sword.
@@ -804,6 +857,19 @@ function startStateServer() {
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
           res.end(buf);
         });
+      } else if (req.url === '/api/command' && req.method === 'POST') {
+        let body = '';
+        req.on('data', (c) => { body += c; if (body.length > 1000) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const cmd = (JSON.parse(body).message || '').toString().slice(0, 100);
+            if (!cmd) { res.writeHead(400); res.end('empty'); return; }
+            console.log(`[dashboard] command: ${cmd}`);
+            bot.emit('chat', 'Dashboard', cmd);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ ok: true }));
+          } catch (e) { res.writeHead(400); res.end('bad request'); }
+        });
       } else { res.writeHead(404); res.end('not found'); }
     });
     srv.listen(STATE_PORT, () => console.log(`[state] dashboard on http://localhost:${STATE_PORT}`));
@@ -854,6 +920,8 @@ bot.on('chat', async (username, message) => {
     if (msg.includes('預けて')) { depositToChest(); return; }
     const giveMatch = msg.match(/^(?:渡して)\s*(\S+)$/) || (msg.includes('ちょうだい') ? [null, msg.replace('ちょうだい','').trim() || '木'] : null);
     if (giveMatch) { giveItem(username, giveMatch[1]); return; }
+    // wooden pickaxe: full chain from gathering (plain craftItem has no materials to work with)
+    if ((msg.includes('ツルハシ') || msg.includes('ピッケル')) && msg.includes('作って') && !msg.includes('石') && !msg.includes('鉄')) { pickaxeMission(); return; }
     // craft: "<something>作って"
     const craftMatch = msg.match(/^(.+?)(?:を)?作って$/);
     if (craftMatch) { const key = craftMatch[1].trim(); const id = JP_CRAFT[key] || (/^[a-z_]+$/.test(key) ? key : null); if (id) { desiredState='busy'; try { await craftItem(id, 1); } finally { if(desiredState==='busy') desiredState='idle'; } } else say(`「${key}」の作り方は未対応。対応: 木のツルハシ/石のツルハシ/作業台/棒/松明/英語ID`); return; }
