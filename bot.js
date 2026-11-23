@@ -981,12 +981,18 @@ async function nightSurvival() {
   try {
     while (nightMode && bot.time && !bot.time.isDay) {
       const h = nearestHostile(4);
-      if (h) { try { await bot.pvp.attack(h); } catch {} continue; }
+      if (h) {
+        // Bound the fight: pvp.attack never resolves when the hostile is
+        // unreachable (e.g. a zombie under the bot's hill/tree), and the first
+        // live night run froze on exactly that — no movement, no logs.
+        try { await withTimeout(bot.pvp.attack(h), 6000, 'night fight'); } catch (e) { console.log(`[night] fight gave up: ${e.message}`); }
+        // Whether it died or not, move on: wandering away is the escape.
+      }
       if (!bot.entity) break;
       const p = bot.entity.position;
       const ang = Math.random() * Math.PI * 2;
       const dist = 14 + Math.random() * 10;
-      try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + Math.cos(ang) * dist, p.y, p.z + Math.sin(ang) * dist, 2)), 20000, 'night wander'); } catch {}
+      try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + Math.cos(ang) * dist, p.y, p.z + Math.sin(ang) * dist, 2)), 20000, 'night wander'); } catch (e) { console.log(`[night] wander failed: ${e.message}`); }
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (e) { console.log('[night] survival error:', e.message); }
