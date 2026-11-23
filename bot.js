@@ -519,6 +519,9 @@ async function pickaxeMission() {
     await step('作業台を作る', async () => { if (countItem('crafting_table') === 0 && !findCraftingTable() && !await craftItem('crafting_table', 1)) throw new Error('作業台クラフト失敗'); });
     await step('棒を作る', async () => { if (countItem('stick') < 2 && !await craftItem('stick', 1)) throw new Error('棒クラフト失敗'); });
     await step('作業台を置く', async () => {
+      // A table placed by an earlier run may already stand nearby; check that
+      // BEFORE demanding a carried one (the inventory guard used to throw first).
+      if (findCraftingTable()) return;
       for (let i = 0; i < 3 && !bot.inventory.items().some(it => it.name === 'crafting_table'); i++) await new Promise(r => setTimeout(r, 1000));
       if (!bot.inventory.items().some(i => i.name === 'crafting_table')) throw new Error('作業台がない');
       if (findCraftingTable()) return;
