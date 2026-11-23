@@ -2,6 +2,7 @@
  "autoEat": true,
  "autoEquip": true,
  "autoFight": true,
+ "autoFish": false,
  "autoPickup": true,
  "autoRecover": true,
  "home": {

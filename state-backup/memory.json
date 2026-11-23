@@ -11,111 +11,105 @@
  },
  "chestContents": [
   {
-   "count": 1,
-   "name": "crafting_table"
+   "count": 2,
+   "name": "oak_log"
+  },
+  {
+   "count": 5,
+   "name": "string"
   },
   {
    "count": 2,
    "name": "egg"
   },
   {
-   "count": 2,
-   "name": "birch_planks"
+   "count": 9,
+   "name": "birch_sapling"
   },
   {
-   "count": 19,
-   "name": "oak_planks"
-  },
-  {
-   "count": 1,
-   "name": "bow"
-  },
-  {
-   "count": 6,
+   "count": 24,
    "name": "stick"
   },
   {
-   "count": 1,
-   "name": "string"
+   "count": 7,
+   "name": "oak_planks"
   },
   {
    "count": 2,
-   "name": "oak_door"
+   "name": "birch_log"
+  },
+  {
+   "count": 4,
+   "name": "feather"
+  },
+  {
+   "count": 6,
+   "name": "birch_planks"
+  },
+  {
+   "count": 11,
+   "name": "oak_sapling"
+  },
+  {
+   "count": 10,
+   "name": "bone"
   },
   {
    "count": 7,
    "name": "arrow"
   },
   {
-   "count": 20,
+   "count": 1,
+   "name": "torch"
+  },
+  {
+   "count": 56,
    "name": "dirt"
   },
   {
    "count": 5,
-   "name": "birch_sapling"
-  },
-  {
-   "count": 7,
-   "name": "oak_sapling"
-  },
-  {
-   "count": 7,
-   "name": "bone"
-  },
-  {
-   "count": 2,
-   "name": "lead"
-  },
-  {
-   "count": 1,
-   "name": "oak_log"
-  },
-  {
-   "count": 1,
-   "name": "furnace"
-  },
-  {
-   "count": 2,
-   "name": "torch"
-  },
-  {
-   "count": 7,
    "name": "cobblestone"
   },
   {
-   "count": 1,
-   "name": "white_bed"
+   "count": 3,
+   "name": "white_wool"
   },
   {
    "count": 1,
-   "name": "white_bed"
+   "name": "crafting_table"
   }
  ],
  "lastDeath": {
-  "at": 1795422273403,
+  "at": 1795460665053,
   "byMob": true,
-  "x": 146,
-  "y": 70,
-  "z": -83
+  "x": 174,
+  "y": 67,
+  "z": -101
  },
  "spots": {
   "forest": {
-   "at": 1795422385498,
-   "x": 172,
+   "at": 1795460711732,
+   "x": 93,
    "y": 70,
-   "z": -116
+   "z": -68
   },
-  "sheep": {
-   "at": 1795417948047,
-   "x": -41,
-   "y": 70,
-   "z": -334
+  "spider": {
+   "at": 1795436872648,
+   "x": 176,
+   "y": 65,
+   "z": -105
   },
   "stone": {
-   "at": 1795421044521,
-   "x": 219,
+   "at": 1795442233858,
+   "x": 196,
+   "y": 60,
+   "z": -89
+  },
+  "water": {
+   "at": 1795440060985,
+   "x": 209,
    "y": 66,
-   "z": -152
+   "z": -153
   }
  }
 }
