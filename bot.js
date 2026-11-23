@@ -408,7 +408,14 @@ async function buildBase() {
   if (baseMode) { say('もう作ってるよ'); return; }
   baseMode = true; soloAbort = false; nightMode = false;
   say('拠点を作るね。まず材料を集めるよ');
+  // The full build takes longer than one Minecraft day on this server, and
+  // working in the open at night gets the bot killed (lost a full inventory
+  // that way, 2026-11-23). Pause at nightfall and survive until dawn.
+  const nightPause = async () => {
+    if (bot.time && !bot.time.isDay) { say('夜になったから朝までやり過ごすね'); await nightSurvival(); }
+  };
   try {
+    await nightPause();
     // 1) logs (keep 5 unconverted for charcoal). Gather in small batches:
     // one big collect call keeps timing out its pathfinding on this server,
     // and the inventory count lags a few seconds behind a failed collect.
@@ -423,15 +430,18 @@ async function buildBase() {
         if (desiredState === 'busy') desiredState = 'idle';
       }
       if (soloAbort) return;
+      await nightPause();
     }
     await new Promise(r => setTimeout(r, 2000));
     if (countLogs() < 22) { say('原木が足りなくて拠点は無理だった'); return; }
     // 2) wooden pickaxe (for cobblestone)
     if (!bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) { await pickaxeMission(); }
     if (soloAbort) return;
+    await nightPause();
     // 3) cobblestone for a furnace
     if (countItem('cobblestone') < 8) await mineStoneManual(8 - countItem('cobblestone'));
     if (soloAbort) return;
+    await nightPause();
     // 4) mass-convert logs to planks (keep 5 logs)
     const plankOf = {}; for (const t of LOG_TYPES) plankOf[t] = PLANK_OF[t];
     let keep = 5;
@@ -485,6 +495,7 @@ async function buildBase() {
       for (let y = gy + 1; y <= baseY; y++) await placeBlockAt(x, y, z, planks).catch(() => false);
     }
     for (let row = 1; row <= 3; row++) {
+      await nightPause(); desiredState = 'busy'; // nightSurvival restores 'idle'
       for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) {
         const isPerim = x === ox || x === ox + 4 || z === oz || z === oz + 4;
         if (!isPerim) continue;
