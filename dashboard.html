@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>むぜ ダッシュボード</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1b1b21; color: #e8e8e8; font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; padding: 12px; }
+  header { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #888; display: inline-block; }
+  .dot.on { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+  .layout { display: flex; gap: 12px; align-items: stretch; }
+  .left { width: 372px; flex: none; display: flex; flex-direction: column; gap: 12px; }
+  .right { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  /* Minecraft GUI style panel */
+  .gui { background: #c6c6c6; border: 3px solid; border-color: #ffffff #555555 #555555 #ffffff; padding: 10px; color: #3f3f3f; }
+  .gui h2 { font-size: 13px; color: #3f3f3f; margin-bottom: 8px; font-weight: 600; }
+  .slot { width: 36px; height: 36px; background: #8b8b8b; border: 2px solid; border-color: #373737 #ffffff #ffffff #373737; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .slot .nm { font-size: 8px; line-height: 1.15; color: #fff; text-shadow: 1px 1px 0 #3f3f3f; text-align: center; word-break: break-all; padding: 1px; }
+  .slot .ct { position: absolute; right: 1px; bottom: 0; font-size: 11px; font-weight: 700; color: #fff; text-shadow: 1px 1px 0 #3f3f3f; }
+  .grid9 { display: grid; grid-template-columns: repeat(9, 36px); gap: 0; }
+  .inv-top { display: flex; gap: 8px; margin-bottom: 8px; }
+  .armor-col { display: grid; grid-template-rows: repeat(4, 36px); gap: 0; }
+  .player-box { flex: 1; background: #22222a; border: 2px solid; border-color: #373737 #ffffff #ffffff #373737; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9fd8a8; min-height: 144px; }
+  .player-box .face { width: 48px; height: 48px; background: #7ec8e3; border: 3px solid #4a7a8c; margin-bottom: 6px; }
+  .player-box .pname { font-size: 13px; color: #e8e8e8; }
+  .craft { display: flex; align-items: center; gap: 6px; }
+  .craft-grid { display: grid; grid-template-columns: repeat(2, 36px); }
+  .craft .arrow { font-size: 18px; color: #3f3f3f; }
+  .offhand-row { display: flex; gap: 8px; margin-top: 6px; align-items: center; }
+  .lbl { font-size: 10px; color: #555; }
+  .sep { height: 6px; }
+  /* info panel */
+  .info { background: #26262e; border: 1px solid #3a3a44; padding: 12px; }
+  .info h2 { font-size: 13px; margin-bottom: 8px; color: #bdbdc7; }
+  .info .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed #34343e; }
+  .info .row:last-child { border-bottom: none; }
+  .bar { height: 8px; background: #3a3a44; border-radius: 4px; overflow: hidden; margin: 2px 0 6px; }
+  .bar > div { height: 100%; }
+  .hp > div { background: #e5484d; }
+  .fd > div { background: #e8a13a; }
+  .xp > div { background: #7ee24a; }
+  /* view panel */
+  .view-head { background: #26262e; border: 1px solid #3a3a44; border-bottom: none; padding: 8px 12px; font-size: 14px; display: flex; gap: 18px; flex-wrap: wrap; }
+  .view-wrap { position: relative; flex: 1; min-height: 420px; background: #000; border: 1px solid #3a3a44; }
+  .view-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .hotbar-strip { position: absolute; left: 50%; transform: translateX(-50%); bottom: 10px; display: flex; gap: 2px; background: rgba(20,20,20,.55); padding: 3px; border: 2px solid rgba(255,255,255,.35); }
+  .hotbar-strip .slot { width: 44px; height: 44px; background: rgba(139,139,139,.85); }
+  .hotbar-strip .slot.sel { border-color: #ffffff; box-shadow: 0 0 0 2px #fff, 0 0 10px #fff; z-index: 1; }
+  .hotbar-strip .slot .nm { font-size: 9px; }
+  .err { color: #e5484d; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>むぜ ダッシュボード</h1>
+  <span id="conn" style="font-size:12px;color:#9a9aa5;">接続中…</span>
+</header>
+<div class="layout">
+  <div class="left">
+    <div class="gui">
+      <h2>インベントリ</h2>
+      <div class="inv-top">
+        <div class="armor-col" id="armor"></div>
+        <div class="player-box">
+          <div class="face"></div>
+          <div class="pname">Muze</div>
+          <div style="font-size:11px;color:#9a9aa5;" id="pb-sub">—</div>
+        </div>
+        <div>
+          <div class="lbl">クラフト</div>
+          <div class="craft">
+            <div class="craft-grid" id="craft"></div>
+            <div class="arrow">➜</div>
+            <div id="craft-result"></div>
+          </div>
+          <div class="offhand-row">
+            <span class="lbl">オフ<br>ハンド</span>
+            <div id="offhand"></div>
+          </div>
+        </div>
+      </div>
+      <div class="grid9" id="main"></div>
+      <div class="sep"></div>
+      <div class="grid9" id="hotbar"></div>
+    </div>
+    <div class="info">
+      <h2>その他情報</h2>
+      <div class="row"><span>体力</span><span id="hp-num">—</span></div>
+      <div class="bar hp"><div id="hp-bar" style="width:0%"></div></div>
+      <div class="row"><span>満腹度</span><span id="fd-num">—</span></div>
+      <div class="bar fd"><div id="fd-bar" style="width:0%"></div></div>
+      <div class="row"><span>経験値レベル</span><span id="xp-num">—</span></div>
+      <div class="bar xp"><div id="xp-bar" style="width:0%"></div></div>
+      <div class="row"><span>座標</span><span id="pos">—</span></div>
+      <div class="row"><span>ディメンション</span><span id="dim">—</span></div>
+      <div class="row"><span>ゲーム内時刻</span><span id="gtime">—</span></div>
+      <div class="row"><span>モード</span><span id="mode">—</span></div>
+      <div class="row"><span>オンライン</span><span id="players">—</span></div>
+    </div>
+  </div>
+  <div class="right">
+    <div class="view-head">
+      <span>座標 <b id="v-pos">—</b></span>
+      <span>方角 <b id="v-dir">—</b></span>
+      <span id="v-day">—</span>
+    </div>
+    <div class="view-wrap">
+      <iframe id="view" title="むぜの視点"></iframe>
+      <div class="hotbar-strip" id="hotbar-strip"></div>
+    </div>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $('view').src = location.protocol + '//' + location.hostname + ':3007/';
+  function slotEl(item, extraCls) {
+    const d = document.createElement('div');
+    d.className = 'slot' + (extraCls ? ' ' + extraCls : '');
+    if (item) {
+      d.title = item.displayName + ' (' + item.name + ')';
+      const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = item.displayName;
+      d.appendChild(nm);
+      if (item.count > 1) { const ct = document.createElement('div'); ct.className = 'ct'; ct.textContent = item.count; d.appendChild(ct); }
+    }
+    return d;
+  }
+  function fill(el, items) { el.innerHTML = ''; items.forEach(it => el.appendChild(slotEl(it))); }
+  function compass(yaw) {
+    const deg = ((Math.round(-yaw * 180 / Math.PI) + 180) % 360 + 360) % 360;
+    const dirs = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
+  async function tick() {
+    try {
+      const r = await fetch('/api/state', { cache: 'no-store' });
+      const s = await r.json();
+      $('dot').className = 'dot' + (s.online ? ' on' : '');
+      $('conn').textContent = s.online ? 'オンライン' : 'スポーン待ち';
+      fill($('armor'), [s.armor.helmet, s.armor.chestplate, s.armor.leggings, s.armor.boots]);
+      fill($('craft'), s.crafting.slots);
+      fill($('craft-result'), [s.crafting.result]);
+      fill($('offhand'), [s.offhand]);
+      fill($('main'), s.main);
+      fill($('hotbar'), s.hotbar);
+      const strip = $('hotbar-strip'); strip.innerHTML = '';
+      s.hotbar.forEach((it, i) => strip.appendChild(slotEl(it, i === s.heldSlot ? 'sel' : '')));
+      $('pb-sub').textContent = 'Lv ' + s.xpLevel + ' / ' + (s.gameMode || '');
+      $('hp-num').textContent = (Math.round(s.health * 10) / 10) + ' / 20';
+      $('hp-bar').style.width = (s.health / 20 * 100) + '%';
+      $('fd-num').textContent = s.food + ' / 20';
+      $('fd-bar').style.width = (s.food / 20 * 100) + '%';
+      $('xp-num').textContent = 'Lv ' + s.xpLevel;
+      $('xp-bar').style.width = (s.xpProgress * 100) + '%';
+      const p = s.position;
+      const posTxt = 'X ' + p.x.toFixed(1) + ' / Y ' + p.y.toFixed(1) + ' / Z ' + p.z.toFixed(1);
+      $('pos').textContent = posTxt; $('v-pos').textContent = posTxt;
+      $('v-dir').textContent = compass(s.yaw);
+      $('dim').textContent = (s.dimension || '').replace('minecraft:', '');
+      const hour = Math.floor(((s.timeOfDay / 1000) + 6) % 24);
+      const min = Math.floor((((s.timeOfDay / 1000) + 6) % 1) * 60);
+      $('gtime').textContent = hour + ':' + String(min).padStart(2, '0') + (s.isDay ? '（昼）' : '（夜）');
+      $('v-day').textContent = s.isDay ? '☀ 昼' : '🌙 夜';
+      $('mode').textContent = s.gameMode || '—';
+      $('players').textContent = s.players.join(', ') || '—';
+    } catch (e) {
+      $('conn').innerHTML = '<span class="err">状態APIに接続できません</span>';
+    }
+  }
+  tick(); setInterval(tick, 1500);
+</script>
+</body>
+</html>

@@ -757,10 +757,63 @@ function startViewer() {
   } catch (e) { console.log(`[viewer] FAILED (canvas/WebGL dependency?): ${e.message}`); }
 }
 
+// ---- state API + dashboard (only when STATE_PORT set) ----
+const STATE_PORT = process.env.STATE_PORT ? parseInt(process.env.STATE_PORT, 10) : 0;
+let stateServerStarted = false;
+function itemJson(it) { return it ? { name: it.name, displayName: it.displayName, count: it.count } : null; }
+function botState() {
+  const slots = (bot.inventory && bot.inventory.slots) || [];
+  const at = (i) => itemJson(slots[i]);
+  const pos = bot.entity ? bot.entity.position : { x: 0, y: 0, z: 0 };
+  return {
+    username: bot.username,
+    health: bot.health, food: bot.food,
+    xpLevel: bot.experience ? bot.experience.level : 0,
+    xpProgress: bot.experience ? bot.experience.progress : 0,
+    gameMode: bot.game ? bot.game.gameMode : '',
+    dimension: bot.game ? bot.game.dimension : '',
+    timeOfDay: bot.time ? bot.time.timeOfDay : 0,
+    isDay: bot.time ? bot.time.isDay : true,
+    position: { x: pos.x, y: pos.y, z: pos.z },
+    yaw: bot.entity ? bot.entity.yaw : 0,
+    pitch: bot.entity ? bot.entity.pitch : 0,
+    heldSlot: bot.quickBarSlot,
+    armor: { helmet: at(5), chestplate: at(6), leggings: at(7), boots: at(8) },
+    offhand: at(45),
+    crafting: { slots: [at(1), at(2), at(3), at(4)], result: at(0) },
+    main: Array.from({ length: 27 }, (_, i) => at(9 + i)),
+    hotbar: Array.from({ length: 9 }, (_, i) => at(36 + i)),
+    players: Object.keys(bot.players || {}),
+    online: !!bot.entity
+  };
+}
+function startStateServer() {
+  if (!STATE_PORT || stateServerStarted) return;
+  stateServerStarted = true;
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const dashPath = path.join(__dirname, 'dashboard.html');
+    const srv = http.createServer((req, res) => {
+      if (req.url === '/api/state') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(botState()));
+      } else if (req.url === '/' || req.url === '/dashboard.html') {
+        fs.readFile(dashPath, (err, buf) => {
+          if (err) { res.writeHead(404); res.end('dashboard.html not found'); return; }
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(buf);
+        });
+      } else { res.writeHead(404); res.end('not found'); }
+    });
+    srv.listen(STATE_PORT, () => console.log(`[state] dashboard on http://localhost:${STATE_PORT}`));
+  } catch (e) { console.log(`[state] FAILED: ${e.message}`); }
+}
+
 // ---- lifecycle ----
 bot.once('spawn', () => {
   try { bot.pathfinder.setMovements(new Movements(bot)); } catch {}
-  setupStateMachine(); startViewer();
+  setupStateMachine(); startViewer(); startStateServer();
   say('むぜ、来たよ');
   console.log(`spawned as ${USERNAME} at ${bot.entity.position}`);
   // auto-totem: try plugin, fall back to manual off-hand equip

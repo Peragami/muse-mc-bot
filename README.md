@@ -4,6 +4,7 @@ Muze (Mineflayer bot) for the Paper 1.21.4 server on Proxmox CT105 (mc-paper).
 
 - The bot lives in the same container as the server and joins `127.0.0.1:25565` (offline mode + whitelist, username `Muze`).
 - First-person viewer (prismarine-viewer) is served on port 3007, so the owner can watch Muze's view live from a browser on the LAN: `http://192.168.0.12:3007`
+- Dashboard (inventory + view + hotbar + status on one page) is served by the bot itself on port 3008: `http://192.168.0.12:3008` (state JSON at `/api/state`)
 
 ## Run (inside CT105)
 
