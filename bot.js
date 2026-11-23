@@ -445,7 +445,7 @@ async function giveItem(username, query) {
 // ---- solo survival ----
 async function soloSurvival() {
   if (soloMode) { say('もうソロで動いてるよ'); return; }
-  soloMode = true; soloAbort = false;
+  soloMode = true; soloAbort = false; nightMode = false;
   const started = Date.now(); const LIMIT = 8 * 60 * 1000;
   const step = async (label, fn) => {
     if (soloAbort) throw new Error('stopped');
@@ -511,7 +511,7 @@ let pickaxeMode = false;
 async function pickaxeMission() {
   if (pickaxeMode) { say('もうツルハシを作ってる途中だよ'); return; }
   if (countItem('wooden_pickaxe') > 0) { say('木のツルハシはもう持ってるよ'); const p = bot.inventory.items().find(i => i.name === 'wooden_pickaxe'); try { await bot.equip(p, 'hand'); } catch {} return; }
-  pickaxeMode = true; soloAbort = false;
+  pickaxeMode = true; soloAbort = false; nightMode = false;
   const started = Date.now(); const LIMIT = 6 * 60 * 1000;
   const step = async (label, fn) => {
     if (soloAbort) throw new Error('stopped');
@@ -525,8 +525,11 @@ async function pickaxeMission() {
       const countLogs = () => bot.inventory.items().filter(i => LOG_TYPES.includes(i.name)).reduce((a, i) => a + i.count, 0);
       // 5 logs, not 3: on this slow CT a lagged craft can double-craft the table
       // (observed live: 2 tables ate 8 planks and the pickaxe starved at 2 planks).
+      // Settle first: right after a (re)spawn the surrounding chunks are still
+      // loading and findBlocks sees nothing (live 2026-11-23: 0 logs in 4 tries).
+      await new Promise(r => setTimeout(r, 5000));
       await collectByNames(LOG_TYPES, 5, '原木');
-      for (const [dx, dz] of [[20, 0], [-20, 10], [10, -20], [-15, -15]]) {
+      for (const [dx, dz] of [[20, 0], [-20, 10], [10, -20], [-15, -15], [45, 0], [-45, 20], [0, 45], [0, -45]]) {
         if (countLogs() > 0 || soloAbort) break;
         console.log(`[pickaxe] no logs yet, relocating by (${dx},${dz}) and retrying`);
         try { const p = bot.entity.position; await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + dx, p.y, p.z + dz, 2)), 45000, 'relocate'); } catch (e) { console.log('[pickaxe] relocate:', e.message); }
@@ -713,7 +716,7 @@ async function smeltRawIron() {
 }
 async function swordMission() {
   if (swordMode) { say('もう鉄の剣を作ってる途中だよ'); return; }
-  swordMode = true;
+  swordMode = true; nightMode = false;
   const started = Date.now(); const LIMIT = 25 * 60 * 1000;
   const step = async (label, fn) => {
     if (soloAbort) throw new Error('stopped');
@@ -812,7 +815,7 @@ const ARMOR_PLAN = [
 ];
 async function armorMission() {
   if (armorMode || swordMode) { say('別のミッション中だよ'); return; }
-  armorMode = true;
+  armorMode = true; nightMode = false;
   const started = Date.now(); const LIMIT = 60 * 60 * 1000;
   const missing = () => ARMOR_PLAN.filter(([name]) => countItem(name) === 0);
   const ingotsNeeded = () => missing().reduce((a, [, cost]) => a + cost, 0);
@@ -958,7 +961,69 @@ bot.once('spawn', () => {
   if (process.env.AUTO_SWORD === '1') setTimeout(() => swordMission(), 4000);
   if (process.env.AUTO_ARMOR === '1') setTimeout(() => armorMission(), 4000);
 });
-bot.on('death', () => { try { deathPos = bot.entity.position.clone(); console.log(`[death] at ${deathPos}`); } catch {} soloAbort = true; fishingMode = false; guardMode = false; });
+bot.on('death', () => { try { deathPos = bot.entity.position.clone(); console.log(`[death] at ${deathPos}`); } catch {} soloAbort = true; fishingMode = false; guardMode = false; deathTimes.push(Date.now()); deathTimes = deathTimes.filter(t => Date.now() - t < 3 * 60 * 1000); if (deathTimes.length >= 3) console.log(`[death] loop detected: ${deathTimes.length} deaths in 3 min`); });
+
+// ---- night survival + death-loop protection ----
+// Incident 2026-11-23: after finishing a mission at dusk the bot idled in the
+// open, got mobbed at world spawn, and died 5+ times in a row (respawn -> slain
+// by shade-sheltering zombies). Standing still at night is what kills it, so
+// at night an idle bot keeps moving (zombies cannot catch a walking bot) and
+// fights back at point blank. A death-loop breaker forces this mode on.
+let nightMode = false;
+let deathTimes = [];
+let firstSpawnSeen = false;
+function anyMissionActive() { return soloMode || pickaxeMode || swordMode || armorMode || fishingMode || guardMode; }
+async function nightSurvival() {
+  if (nightMode) return;
+  nightMode = true;
+  console.log('[night] survival mode start');
+  say('夜は危ないから動き回ってやり過ごすね');
+  try {
+    while (nightMode && bot.time && !bot.time.isDay) {
+      const h = nearestHostile(4);
+      if (h) { try { await bot.pvp.attack(h); } catch {} continue; }
+      if (!bot.entity) break;
+      const p = bot.entity.position;
+      const ang = Math.random() * Math.PI * 2;
+      const dist = 14 + Math.random() * 10;
+      try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(p.x + Math.cos(ang) * dist, p.y, p.z + Math.sin(ang) * dist, 2)), 20000, 'night wander'); } catch {}
+      await new Promise(r => setTimeout(r, 500));
+    }
+  } catch (e) { console.log('[night] survival error:', e.message); }
+  finally { nightMode = false; console.log('[night] survival mode end'); }
+}
+// Respawn handling: first spawn is set up by the once('spawn') handler above.
+bot.on('spawn', () => {
+  if (!firstSpawnSeen) { firstSpawnSeen = true; return; }
+  console.log('[spawn] respawned');
+  setTimeout(async () => {
+    try {
+      if (!bot.entity || !bot.time) return;
+      if (!bot.time.isDay) { nightSurvival(); return; }
+      // Daytime: walk back to the death spot to recover dropped items (5 min
+      // despawn) when nothing hostile is around.
+      if (deathPos && !nearestHostile(12)) {
+        const dp = deathPos; deathPos = null;
+        say('落としたものを回収しに行くね');
+        try {
+          await withTimeout(bot.pathfinder.goto(new goals.GoalNear(dp.x, dp.y, dp.z, 1)), 60000, 'recover drops');
+          await new Promise(r => setTimeout(r, 3000));
+          console.log('[spawn] drop recovery walk done');
+          say('回収できたはず。今の持ち物を確認してね');
+        } catch (e) { console.log('[spawn] drop recovery failed:', e.message); }
+      }
+    } catch (e) { console.log('[spawn] respawn handler:', e.message); }
+  }, 1500);
+});
+// Watchdog: an idle bot must never sit in the open at night, and repeated
+// deaths force survival mode even mid-evening.
+setInterval(() => {
+  try {
+    if (!bot.entity || !bot.time || nightMode) return;
+    const looped = deathTimes.length >= 3;
+    if (!bot.time.isDay && (looped || !anyMissionActive())) { console.log(`[night] watchdog engaging survival (looped=${looped})`); nightSurvival(); }
+  } catch {}
+}, 20000);
 bot.on('kicked', (r) => console.log('kicked:', r));
 bot.on('error', (e) => console.log('error:', e.message));
 bot.on('end', (r) => console.log('disconnected:', r));
