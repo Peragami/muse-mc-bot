@@ -1,0 +1,13 @@
+{
+ "autoEat": true,
+ "autoEquip": true,
+ "autoFight": true,
+ "autoPickup": true,
+ "autoRecover": true,
+ "home": {
+  "x": 178,
+  "y": 71,
+  "z": -105
+ },
+ "nightSurvival": true
+}

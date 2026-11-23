@@ -1,0 +1,121 @@
+{
+ "bed": {
+  "x": 179,
+  "y": 71,
+  "z": -105
+ },
+ "chest": {
+  "x": 178,
+  "y": 71,
+  "z": -106
+ },
+ "chestContents": [
+  {
+   "count": 1,
+   "name": "crafting_table"
+  },
+  {
+   "count": 2,
+   "name": "egg"
+  },
+  {
+   "count": 2,
+   "name": "birch_planks"
+  },
+  {
+   "count": 19,
+   "name": "oak_planks"
+  },
+  {
+   "count": 1,
+   "name": "bow"
+  },
+  {
+   "count": 6,
+   "name": "stick"
+  },
+  {
+   "count": 1,
+   "name": "string"
+  },
+  {
+   "count": 2,
+   "name": "oak_door"
+  },
+  {
+   "count": 7,
+   "name": "arrow"
+  },
+  {
+   "count": 20,
+   "name": "dirt"
+  },
+  {
+   "count": 5,
+   "name": "birch_sapling"
+  },
+  {
+   "count": 7,
+   "name": "oak_sapling"
+  },
+  {
+   "count": 7,
+   "name": "bone"
+  },
+  {
+   "count": 2,
+   "name": "lead"
+  },
+  {
+   "count": 1,
+   "name": "oak_log"
+  },
+  {
+   "count": 1,
+   "name": "furnace"
+  },
+  {
+   "count": 2,
+   "name": "torch"
+  },
+  {
+   "count": 7,
+   "name": "cobblestone"
+  },
+  {
+   "count": 1,
+   "name": "white_bed"
+  },
+  {
+   "count": 1,
+   "name": "white_bed"
+  }
+ ],
+ "lastDeath": {
+  "at": 1795422273403,
+  "byMob": true,
+  "x": 146,
+  "y": 70,
+  "z": -83
+ },
+ "spots": {
+  "forest": {
+   "at": 1795422385498,
+   "x": 172,
+   "y": 70,
+   "z": -116
+  },
+  "sheep": {
+   "at": 1795417948047,
+   "x": -41,
+   "y": 70,
+   "z": -334
+  },
+  "stone": {
+   "at": 1795421044521,
+   "x": 219,
+   "y": 66,
+   "z": -152
+  }
+ }
+}
