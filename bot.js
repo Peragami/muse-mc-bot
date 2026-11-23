@@ -536,6 +536,27 @@ function closeDoorNear() {
     }
   } catch {}
 }
+// After losing to a monster, do not walk back bare-handed: craft at least a
+// wooden sword first (user request 2026-11-23). Gathers 2 logs if needed.
+async function ensureWoodenSword() {
+  if (!bot.inventory) return false;
+  if (bot.inventory.items().some(i => i.name.endsWith('_sword'))) return true;
+  console.log('[sword] crafting a wooden sword before heading back');
+  say('先に木の剣を作るね');
+  if (countItem('stick') < 1) { try { await craftItem('stick', 1); } catch {} }
+  let p = bot.inventory.items().find(i => i.name.endsWith('_planks'));
+  if (!p || p.count < 6) { // sword 2 + a crafting table 4 if none is around
+    let log = bot.inventory.items().find(i => LOG_TYPES.includes(i.name));
+    if (!log) { await collectByNames(LOG_TYPES, 2, '原木', 32); log = bot.inventory.items().find(i => LOG_TYPES.includes(i.name)); }
+    if (log) { try { await craftItem(PLANK_OF[log.name], 1); } catch {} if (countItem('stick') < 1) { try { await craftItem('stick', 1); } catch {} } }
+  }
+  p = bot.inventory.items().find(i => i.name.endsWith('_planks'));
+  if (!p) return false;
+  const swordName = p.name.replace('_planks', '_sword');
+  const ok = await craftItem(swordName, 1);
+  if (ok) { const sw = bot.inventory.items().find(i => i.name === swordName); if (sw) { try { await bot.equip(sw, 'hand'); } catch {} } console.log('[sword] wooden sword ready'); }
+  return ok;
+}
 // Walk back to the registered base. Caller owns desiredState ('busy').
 async function goHome() {
   if (!settings.home || !bot.entity) return false;
@@ -1163,6 +1184,17 @@ let autoBusy = false;
 let lastEatAt = 0;
 let lastEquipAt = 0;
 let lastHuntAt = 0;
+// Entities that proved unreachable/unkillable get skipped for a while —
+// without this the tick retried the same stuck drop / kiting skeleton every
+// 3s forever (seen live 2026-11-23).
+const pickupBan = new Map();
+const fightBan = new Map();
+function nearestFightable(range = 8) {
+  if (!bot.entity) return null;
+  const es = Object.values(bot.entities).filter(e => e && e !== bot.entity && e.position && HOSTILES.has(e.name) && bot.entity.position.distanceTo(e.position) <= range && !((fightBan.get(e.id) || {}).until > Date.now()));
+  es.sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position));
+  return es[0] || null;
+}
 setInterval(async () => {
   try {
     if (!bot.entity || !bot.inventory || autoBusy) return;
@@ -1204,40 +1236,41 @@ setInterval(async () => {
     // Fight hostiles that come close (not during missions: checkDanger covers
     // step boundaries there; not during night survival: its loop fights too).
     if (settings.autoFight && !anyMissionActive() && !nightMode) {
-      const h = nearestHostile(8);
-      if (h) {
-        // Survival first: at low health, do not start a fight bare-handed —
-        // fall back and eat to regen. (A 17hp fist-fight vs husk+enderman
-        // killed the bot in the 2026-11-23 live test.)
-        if (bot.health <= 10) {
-          autoBusy = true; autoLabel = '撤退中'; desiredState = 'busy';
-          console.log(`[auto] health low (${bot.health}) — retreating from ${h.name}`);
-          say('体力が少ないから逃げるね');
+      // Survival first: at low health, do not start a fight bare-handed —
+      // fall back and eat to regen. (A 17hp fist-fight vs husk+enderman
+      // killed the bot in the 2026-11-23 live test.) The retreat decision
+      // uses ANY hostile, even one we stopped trying to kill.
+      const hAny = nearestHostile(8);
+      if (hAny && bot.health <= 10) {
+        autoBusy = true; autoLabel = '撤退中'; desiredState = 'busy';
+        console.log(`[auto] health low (${bot.health}) — retreating from ${hAny.name}`);
+        say('体力が少ないから逃げるね');
+        try {
+          // Pathfinding is too slow on this server to trust in an emergency
+          // (retreat gotos timed out deciding while a skeleton kept
+          // shooting, 2026-11-23): sprint straight away first.
+          const { Vec3 } = require('vec3');
+          const p = bot.entity.position;
+          const away = new Vec3(p.x + (p.x - hAny.position.x) * 3, p.y + 1.6, p.z + (p.z - hAny.position.z) * 3);
           try {
-            // Pathfinding is too slow on this server to trust in an emergency
-            // (retreat gotos timed out deciding while a skeleton kept
-            // shooting, 2026-11-23): sprint straight away first, then walk
-            // farther with the pathfinder once there is some distance.
-            const { Vec3 } = require('vec3');
-            const p = bot.entity.position;
-            const away = new Vec3(p.x + (p.x - h.position.x) * 3, p.y + 1.6, p.z + (p.z - h.position.z) * 3);
-            try {
-              await bot.lookAt(away, true);
-              bot.setControlState('forward', true); bot.setControlState('sprint', true); bot.setControlState('jump', true);
-              await new Promise(r => setTimeout(r, 600));
-              bot.setControlState('jump', false);
-              await new Promise(r => setTimeout(r, 2900));
-              bot.clearControlStates();
-            } catch {}
-            if (!nearestHostile(10)) {
-              const food = bestFoodItem();
-              if (food && bot.food < 20) { try { await bot.equip(food, 'hand'); await bot.consume(); lastEatAt = Date.now(); } catch {} }
-            }
-          } catch (e) { console.log('[auto] retreat failed:', e.message); }
-          if (desiredState === 'busy') desiredState = 'idle';
-          autoBusy = false; autoLabel = '';
-          return;
-        }
+            await bot.lookAt(away, true);
+            bot.setControlState('forward', true); bot.setControlState('sprint', true); bot.setControlState('jump', true);
+            await new Promise(r => setTimeout(r, 600));
+            bot.setControlState('jump', false);
+            await new Promise(r => setTimeout(r, 2900));
+            bot.clearControlStates();
+          } catch {}
+          if (!nearestHostile(10)) {
+            const food = bestFoodItem();
+            if (food && bot.food < 20) { try { await bot.equip(food, 'hand'); await bot.consume(); lastEatAt = Date.now(); } catch {} }
+          }
+        } catch (e) { console.log('[auto] retreat failed:', e.message); }
+        if (desiredState === 'busy') desiredState = 'idle';
+        autoBusy = false; autoLabel = '';
+        return;
+      }
+      const h = nearestFightable(8);
+      if (h) {
         autoBusy = true; autoLabel = '戦闘中'; desiredState = 'busy';
         const weapon = bot.inventory.items().find(i => i.name.endsWith('_sword')) || bot.inventory.items().find(i => i.name.endsWith('_axe')) || bot.inventory.items().find(i => i.name.endsWith('_pickaxe'));
         if (weapon) { try { await bot.equip(weapon, 'hand'); } catch {} }
@@ -1247,6 +1280,12 @@ setInterval(async () => {
         const hpWatch = setInterval(() => { try { if (!hpStopped && bot.health <= 5 && bot.pvp) { hpStopped = true; console.log('[auto] health critical — stopping fight'); if (bot.pvp.forceStop) bot.pvp.forceStop(); else if (bot.pvp.stop) bot.pvp.stop(); } } catch {} }, 500);
         try { await withTimeout(bot.pvp.attack(h), 15000, 'autoFight'); } catch (e) { console.log('[auto] fight gave up:', e.message); }
         clearInterval(hpWatch);
+        // Still alive and close after two attempts? It is kiting or stuck —
+        // leave it alone for a while instead of eating arrows forever.
+        const rec = fightBan.get(h.id) || { n: 0, until: 0 };
+        const still = bot.entities[h.id];
+        if (still && still.position && bot.entity.position.distanceTo(still.position) <= 14) { rec.n++; if (rec.n >= 2) { rec.until = Date.now() + 90000; rec.n = 0; console.log(`[auto] ${h.name} is not dying — leaving it alone for a while`); } } else rec.n = 0;
+        fightBan.set(h.id, rec);
         if (desiredState === 'busy') desiredState = 'idle';
         autoBusy = false; autoLabel = '';
         return;
@@ -1254,13 +1293,15 @@ setInterval(async () => {
     }
     // Pick up dropped items lying around (idle only, within 24 blocks).
     if (settings.autoPickup && !anyMissionActive() && !nightMode) {
-      const drops = Object.values(bot.entities).filter(e => e && e !== bot.entity && e.position && e.name === 'item' && bot.entity.position.distanceTo(e.position) <= 24);
+      const drops = Object.values(bot.entities).filter(e => e && e !== bot.entity && e.position && e.name === 'item' && bot.entity.position.distanceTo(e.position) <= 24 && !(pickupBan.get(e.id) > Date.now()));
       if (drops.length) {
         drops.sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position));
         const d = drops[0];
         autoBusy = true; autoLabel = 'ドロップ回収中'; desiredState = 'busy';
         console.log(`[auto] picking up drop at ${d.position}`);
-        try { await gotoWatched(new goals.GoalNear(d.position.x, d.position.y, d.position.z, 1), 20000, 'autoPickup'); await new Promise(r => setTimeout(r, 600)); } catch (e) { console.log('[auto] pickup failed:', e.message); }
+        try { await gotoWatched(new goals.GoalNear(d.position.x, d.position.y, d.position.z, 1), 20000, 'autoPickup'); await new Promise(r => setTimeout(r, 1200)); } catch (e) { console.log('[auto] pickup failed:', e.message); }
+        const still = bot.entities[d.id];
+        if (still && still.position && bot.entity.position.distanceTo(still.position) < 3) { pickupBan.set(d.id, Date.now() + 5 * 60 * 1000); console.log('[auto] that drop seems unreachable — skipping it for a while'); }
         if (desiredState === 'busy') desiredState = 'idle';
         autoBusy = false; autoLabel = '';
         return;
@@ -1372,7 +1413,7 @@ bot.once('spawn', () => {
   if (process.env.AUTO_SWORD === '1') setTimeout(() => swordMission(), 4000);
   if (process.env.AUTO_ARMOR === '1') setTimeout(() => armorMission(), 4000);
 });
-bot.on('death', () => { try { deathPos = bot.entity.position.clone(); console.log(`[death] at ${deathPos}`); } catch {} soloAbort = true; fishingMode = false; guardMode = false; deathTimes.push(Date.now()); deathTimes = deathTimes.filter(t => Date.now() - t < 3 * 60 * 1000); if (deathTimes.length >= 3) console.log(`[death] loop detected: ${deathTimes.length} deaths in 3 min`); });
+bot.on('death', () => { try { lastDeathByMob = !!nearestHostile(16); } catch { lastDeathByMob = false; } try { deathPos = bot.entity.position.clone(); console.log(`[death] at ${deathPos} (byMob=${lastDeathByMob})`); } catch {} soloAbort = true; fishingMode = false; guardMode = false; deathTimes.push(Date.now()); deathTimes = deathTimes.filter(t => Date.now() - t < 3 * 60 * 1000); if (deathTimes.length >= 3) console.log(`[death] loop detected: ${deathTimes.length} deaths in 3 min`); });
 
 // ---- night survival + death-loop protection ----
 // Incident 2026-11-23: after finishing a mission at dusk the bot idled in the
@@ -1383,6 +1424,7 @@ bot.on('death', () => { try { deathPos = bot.entity.position.clone(); console.lo
 let nightMode = false;
 let homeWaitMode = false;
 let deathTimes = [];
+let lastDeathByMob = false;
 let firstSpawnSeen = false;
 function anyMissionActive() { return soloMode || pickaxeMode || swordMode || armorMode || fishingMode || guardMode || baseMode; }
 async function nightSurvival() {
@@ -1462,6 +1504,27 @@ bot.on('spawn', () => {
     try {
       if (!bot.entity || !bot.time) return;
       if (!bot.time.isDay) { if (settings.nightSurvival) nightSurvival(); return; }
+      // If mobs camp the respawn point, sprint away before anything else —
+      // the bot died 6 times in 3 minutes at a camped spawn (2026-11-23).
+      const camper = nearestHostile(12);
+      if (camper) {
+        console.log(`[spawn] hostile near respawn (${camper.name}) — escaping first`);
+        desiredState = 'busy';
+        try {
+          const { Vec3 } = require('vec3');
+          const p = bot.entity.position;
+          await bot.lookAt(new Vec3(p.x + (p.x - camper.position.x) * 3, p.y + 1.6, p.z + (p.z - camper.position.z) * 3), true);
+          bot.setControlState('forward', true); bot.setControlState('sprint', true); bot.setControlState('jump', true);
+          await new Promise(r => setTimeout(r, 600));
+          bot.setControlState('jump', false);
+          await new Promise(r => setTimeout(r, 2900));
+          bot.clearControlStates();
+        } catch {}
+        if (desiredState === 'busy') desiredState = 'idle';
+      }
+      // Killed by a monster? Craft at least a wooden sword before going
+      // back (user request 2026-11-23).
+      if (lastDeathByMob && deathPos) { try { await ensureWoodenSword(); } catch (e) { console.log('[spawn] sword craft failed:', e.message); } }
       // Daytime: walk back to the death spot to recover dropped items (5 min
       // despawn) when nothing hostile is around. But after repeated deaths
       // the drops are not worth dying for again (the bot died twice more
