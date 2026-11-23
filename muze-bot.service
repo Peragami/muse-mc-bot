@@ -1,6 +1,6 @@
 [Unit]
 Description=Muze Minecraft bot (Mineflayer) for CT105 Paper server
-After=network-online.target minecraft.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
