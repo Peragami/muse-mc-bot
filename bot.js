@@ -919,11 +919,12 @@ setInterval(async () => {
     if (settings.autoFight && !anyMissionActive() && !nightMode) {
       const h = nearestHostile(8);
       if (h) {
-        autoBusy = true;
+        autoBusy = true; desiredState = 'busy';
         const weapon = bot.inventory.items().find(i => i.name.endsWith('_sword')) || bot.inventory.items().find(i => i.name.endsWith('_axe')) || bot.inventory.items().find(i => i.name.endsWith('_pickaxe'));
         if (weapon) { try { await bot.equip(weapon, 'hand'); } catch {} }
         console.log(`[auto] fighting ${h.name} at ${bot.entity.position.distanceTo(h.position).toFixed(1)}m`);
         try { await withTimeout(bot.pvp.attack(h), 15000, 'autoFight'); } catch (e) { console.log('[auto] fight gave up:', e.message); }
+        if (desiredState === 'busy') desiredState = 'idle';
         autoBusy = false;
         return;
       }
@@ -934,9 +935,10 @@ setInterval(async () => {
       if (drops.length) {
         drops.sort((a, b) => bot.entity.position.distanceTo(a.position) - bot.entity.position.distanceTo(b.position));
         const d = drops[0];
-        autoBusy = true;
+        autoBusy = true; desiredState = 'busy';
         console.log(`[auto] picking up drop at ${d.position}`);
         try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(d.position.x, d.position.y, d.position.z, 1)), 15000, 'autoPickup'); await new Promise(r => setTimeout(r, 600)); } catch (e) { console.log('[auto] pickup failed:', e.message); }
+        if (desiredState === 'busy') desiredState = 'idle';
         autoBusy = false;
         return;
       }
@@ -1058,6 +1060,11 @@ function anyMissionActive() { return soloMode || pickaxeMode || swordMode || arm
 async function nightSurvival() {
   if (nightMode) return;
   nightMode = true;
+  // desiredState must be 'busy': at 'idle' the state machine makes
+  // pathfinder.goto resolve instantly without moving (found live 2026-11-23
+  // via wander logs: "arrived" in 0s, position unchanged). Every working
+  // goto in this codebase (collectByNames, attackEntity, crafts) runs busy.
+  desiredState = 'busy';
   console.log('[night] survival mode start');
   say('夜は危ないから動き回ってやり過ごすね');
   try {
@@ -1080,7 +1087,7 @@ async function nightSurvival() {
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (e) { console.log('[night] survival error:', e.message); }
-  finally { nightMode = false; console.log('[night] survival mode end'); }
+  finally { nightMode = false; if (desiredState === 'busy') desiredState = 'idle'; console.log('[night] survival mode end'); }
 }
 // Respawn handling: first spawn is set up by the once('spawn') handler above.
 bot.on('spawn', () => {
@@ -1095,12 +1102,14 @@ bot.on('spawn', () => {
       if (settings.autoRecover && deathPos && !nearestHostile(12)) {
         const dp = deathPos; deathPos = null;
         say('落としたものを回収しに行くね');
+        desiredState = 'busy'; // goto only moves while busy (see nightSurvival note)
         try {
           await withTimeout(bot.pathfinder.goto(new goals.GoalNear(dp.x, dp.y, dp.z, 1)), 60000, 'recover drops');
           await new Promise(r => setTimeout(r, 3000));
           console.log('[spawn] drop recovery walk done');
           say('回収できたはず。今の持ち物を確認してね');
         } catch (e) { console.log('[spawn] drop recovery failed:', e.message); }
+        finally { if (desiredState === 'busy') desiredState = 'idle'; }
       }
     } catch (e) { console.log('[spawn] respawn handler:', e.message); }
   }, 1500);
