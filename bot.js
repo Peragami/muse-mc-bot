@@ -20,7 +20,7 @@ const BODIES = [
   { username: 'Muze', viewerPort: 3007, statePort: 3008, callName: 'むぜ', primary: true },
   { username: 'Yume', viewerPort: 3017, statePort: 3018, callName: 'ゆめ', primary: false },
 ];
-const MODULES = ['./lib/world', './lib/craft', './lib/home', './lib/missions', './lib/life', './lib/dashboard', './lib/chat'];
+const MODULES = ['./lib/world', './lib/coop', './lib/craft', './lib/home', './lib/missions', './lib/life', './lib/dashboard', './lib/chat'];
 
 for (const cfg of BODIES) {
   const ctx = createCtx(cfg);
