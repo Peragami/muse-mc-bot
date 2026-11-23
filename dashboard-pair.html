@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>むぜ＆ゆめ ダッシュボード</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #1b1b21; color: #e8e8e8; font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; padding: 12px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  header h1 { font-size: 18px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #888; display: inline-block; flex: none; }
+  .dot.on { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+  .panels { display: grid; grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); gap: 12px; align-items: start; }
+  .panel { background: #26262e; border: 1px solid #3a3a44; }
+  .panel-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #3a3a44; flex-wrap: wrap; }
+  .panel-head .name { font-size: 16px; font-weight: 700; }
+  .panel-head .uname { font-size: 12px; color: #9a9aa5; }
+  .panel-head .act { margin-left: auto; font-size: 12px; color: #bdbdc7; }
+  .view-wrap { position: relative; aspect-ratio: 16 / 9; background: #000; }
+  .view-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .stats { padding: 10px 12px 4px; }
+  .stats .row { display: flex; justify-content: space-between; font-size: 13px; padding: 2px 0; }
+  .bar { height: 8px; background: #3a3a44; border-radius: 4px; overflow: hidden; margin: 2px 0 6px; }
+  .bar > div { height: 100%; }
+  .hp > div { background: #e5484d; }
+  .fd > div { background: #e8a13a; }
+  .xp > div { background: #7ee24a; }
+  .gui { background: #c6c6c6; border: 3px solid; border-color: #ffffff #555555 #555555 #ffffff; padding: 10px; color: #3f3f3f; margin: 10px 12px 12px; }
+  .gui h2 { font-size: 13px; color: #3f3f3f; margin-bottom: 8px; font-weight: 600; }
+  .slot { width: 36px; height: 36px; background: #8b8b8b; border: 2px solid; border-color: #373737 #ffffff #ffffff #373737; position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  .slot .nm { font-size: 8px; line-height: 1.15; color: #fff; text-shadow: 1px 1px 0 #3f3f3f; text-align: center; word-break: break-all; padding: 1px; }
+  .slot .ct { position: absolute; right: 1px; bottom: 0; font-size: 11px; font-weight: 700; color: #fff; text-shadow: 1px 1px 0 #3f3f3f; z-index: 2; }
+  .slot img.icon { position: absolute; inset: 2px; width: calc(100% - 4px); height: calc(100% - 4px); image-rendering: pixelated; pointer-events: none; }
+  .slot.sel { border-color: #ffffff; box-shadow: 0 0 0 2px #fff; z-index: 1; }
+  .grid9 { display: grid; grid-template-columns: repeat(9, 36px); gap: 0; }
+  .inv-top { display: flex; gap: 8px; margin-bottom: 8px; }
+  .armor-col { display: grid; grid-template-rows: repeat(4, 36px); gap: 0; }
+  .sep { height: 6px; }
+  .lbl { font-size: 10px; color: #555; }
+  .cmdbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 0 12px 12px; }
+  .cmdbar button { background: #3a3a44; color: #e8e8e8; border: 1px solid #55555f; padding: 6px 10px; font-size: 13px; cursor: pointer; border-radius: 4px; }
+  .cmdbar button:hover { background: #4a4a56; }
+  .cmdbar input { flex: 1; min-width: 120px; background: #1b1b21; color: #e8e8e8; border: 1px solid #55555f; padding: 6px 8px; font-size: 13px; border-radius: 4px; }
+  .cmdbar .sent { font-size: 12px; color: #7ee24a; }
+  .shared { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 12px; margin-top: 12px; align-items: start; }
+  .info { background: #26262e; border: 1px solid #3a3a44; padding: 12px; }
+  .info h2 { font-size: 13px; margin-bottom: 8px; color: #bdbdc7; }
+  .info .row { display: flex; justify-content: space-between; font-size: 13px; padding: 3px 0; border-bottom: 1px dashed #34343e; gap: 10px; }
+  .info .row:last-child { border-bottom: none; }
+  .info .row span:last-child { text-align: right; word-break: break-all; }
+  .settings .srow { display: flex; justify-content: space-between; align-items: center; font-size: 13px; padding: 5px 0; border-bottom: 1px dashed #34343e; }
+  .settings .srow:last-child { border-bottom: none; }
+  .switch { position: relative; width: 40px; height: 22px; flex: none; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track { position: absolute; inset: 0; background: #55555f; border-radius: 11px; transition: .15s; cursor: pointer; }
+  .switch .track:before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: #e8e8e8; border-radius: 50%; transition: .15s; }
+  .switch input:checked + .track { background: #4caf50; }
+  .switch input:checked + .track:before { transform: translateX(18px); }
+  .err { color: #e5484d; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>むぜ＆ゆめ ダッシュボード</h1>
+  <span id="gtime" style="font-size:13px;color:#bdbdc7;">—</span>
+  <span id="conn" style="font-size:12px;color:#9a9aa5;">接続中…</span>
+</header>
+<div class="panels" id="panels"></div>
+<div class="shared">
+  <div class="info settings">
+    <h2>設定（自動ですること・2人共通）</h2>
+    <div class="srow"><span>お腹が減ったら自動で食べる</span><label class="switch"><input type="checkbox" id="set-autoEat"><span class="track"></span></label></div>
+    <div class="srow"><span>近くのモンスターを自動で倒す</span><label class="switch"><input type="checkbox" id="set-autoFight"><span class="track"></span></label></div>
+    <div class="srow"><span>ドロップ品を自動で拾いに行く</span><label class="switch"><input type="checkbox" id="set-autoPickup"><span class="track"></span></label></div>
+    <div class="srow"><span>昼間ひまなとき自動で釣り</span><label class="switch"><input type="checkbox" id="set-autoFish"><span class="track"></span></label></div>
+    <div class="srow"><span>夜は拠点に帰る（なければ動き回る）</span><label class="switch"><input type="checkbox" id="set-nightSurvival"><span class="track"></span></label></div>
+    <div class="srow"><span>死んだら落下物を取りに戻る</span><label class="switch"><input type="checkbox" id="set-autoRecover"><span class="track"></span></label></div>
+    <div class="srow"><span>防具を自動で装備する</span><label class="switch"><input type="checkbox" id="set-autoEquip"><span class="track"></span></label></div>
+  </div>
+  <div class="info">
+    <h2>記憶（2人共通）</h2>
+    <div class="row"><span>チェストの中身</span><span id="mem-chest">—</span></div>
+    <div class="row"><span>木が取れた場所</span><span id="mem-forest">—</span></div>
+    <div class="row"><span>石が掘れた場所</span><span id="mem-stone">—</span></div>
+    <div class="row"><span>ベッド</span><span id="mem-bed">—</span></div>
+    <div class="row"><span>最後に死んだ場所</span><span id="mem-death">—</span></div>
+  </div>
+  <div class="info">
+    <h2>ログ（最新15件）</h2>
+    <div id="logs" style="font-size:11px;line-height:1.5;color:#bdbdc7;word-break:break-all;">—</div>
+  </div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const ACCENTS = { Muze: '#7ec8e3', Yume: '#f2a7c3' };
+  const QUICK = ['うちかえる', '預けて', '釣って', '池作って', '覚えてること', 'とまれ'];
+  function slotEl(item, extraCls) {
+    const d = document.createElement('div');
+    d.className = 'slot' + (extraCls ? ' ' + extraCls : '');
+    if (item) {
+      d.title = item.displayName + ' (' + item.name + ')';
+      const nm = document.createElement('div'); nm.className = 'nm'; nm.textContent = item.displayName;
+      d.appendChild(nm);
+      const img = document.createElement('img'); img.className = 'icon'; img.alt = '';
+      img.onload = () => { nm.style.display = 'none'; };
+      img.onerror = () => { img.remove(); };
+      img.src = '/textures/' + item.name + '.png';
+      d.appendChild(img);
+      if (item.count > 1) { const ct = document.createElement('div'); ct.className = 'ct'; ct.textContent = item.count; d.appendChild(ct); }
+    }
+    return d;
+  }
+  function fill(el, items, selIdx) { el.innerHTML = ''; items.forEach((it, i) => el.appendChild(slotEl(it, selIdx !== undefined && i === selIdx ? 'sel' : ''))); }
+  function compass(yaw) {
+    const deg = ((Math.round(-yaw * 180 / Math.PI) + 180) % 360 + 360) % 360;
+    const dirs = ['北', '北東', '東', '南東', '南', '南西', '西', '北西'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
+  async function sendCmd(username, text, sentEl) {
+    const cmd = (text || '').trim();
+    if (!cmd) return;
+    try {
+      const r = await fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, message: cmd }) });
+      sentEl.textContent = r.ok ? ('送信: ' + cmd) : '送信に失敗';
+    } catch (e) { sentEl.textContent = '送信に失敗'; }
+    setTimeout(() => { sentEl.textContent = ''; }, 4000);
+  }
+  function buildPanel(b) {
+    const u = b.username;
+    const panel = document.createElement('div');
+    panel.className = 'panel';
+    panel.id = 'panel-' + u;
+    panel.innerHTML =
+      '<div class="panel-head"><span class="dot" id="dot-' + u + '"></span>' +
+      '<span class="name" style="color:' + (ACCENTS[u] || '#e8e8e8') + '">' + (b.callName || u) + '</span>' +
+      '<span class="uname">' + u + '</span><span class="act" id="act-' + u + '">—</span></div>' +
+      '<div class="view-wrap"><iframe id="view-' + u + '" title="' + u + 'の視点"></iframe></div>' +
+      '<div class="stats">' +
+      '<div class="row"><span>体力</span><span id="hp-num-' + u + '">—</span></div><div class="bar hp"><div id="hp-bar-' + u + '" style="width:0%"></div></div>' +
+      '<div class="row"><span>満腹度</span><span id="fd-num-' + u + '">—</span></div><div class="bar fd"><div id="fd-bar-' + u + '" style="width:0%"></div></div>' +
+      '<div class="row"><span>経験値</span><span id="xp-num-' + u + '">—</span></div><div class="bar xp"><div id="xp-bar-' + u + '" style="width:0%"></div></div>' +
+      '<div class="row"><span>座標</span><span id="pos-' + u + '">—</span></div>' +
+      '<div class="row"><span>方角</span><span id="dir-' + u + '">—</span></div>' +
+      '</div>' +
+      '<div class="gui"><h2>インベントリ</h2>' +
+      '<div class="inv-top"><div class="armor-col" id="armor-' + u + '"></div>' +
+      '<div><div class="lbl">オフハンド</div><div id="offhand-' + u + '"></div></div></div>' +
+      '<div class="grid9" id="main-' + u + '"></div><div class="sep"></div><div class="grid9" id="hotbar-' + u + '"></div></div>' +
+      '<div class="cmdbar" id="cmdbar-' + u + '"></div>';
+    $('panels').appendChild(panel);
+    const iframe = $('view-' + u);
+    iframe.src = location.protocol + '//' + location.hostname + ':' + b.viewerPort + '/';
+    const bar = $('cmdbar-' + u);
+    QUICK.forEach(q => {
+      const btn = document.createElement('button');
+      btn.textContent = q;
+      btn.addEventListener('click', () => sendCmd(u, q, $('sent-' + u)));
+      bar.appendChild(btn);
+    });
+    const input = document.createElement('input');
+    input.type = 'text'; input.maxLength = 100; input.placeholder = (b.callName || u) + 'へのコマンド';
+    input.id = 'cmd-input-' + u;
+    const send = document.createElement('button');
+    send.textContent = '送信';
+    const sent = document.createElement('span');
+    sent.className = 'sent'; sent.id = 'sent-' + u;
+    const doSend = () => { sendCmd(u, input.value, sent); input.value = ''; };
+    send.addEventListener('click', doSend);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSend(); });
+    bar.appendChild(input); bar.appendChild(send); bar.appendChild(sent);
+    return panel;
+  }
+  function updatePanel(b) {
+    const u = b.username;
+    if (!b.armor) { $('act-' + u).textContent = 'オフライン'; return; }
+    $('dot-' + u).className = 'dot' + (b.online ? ' on' : '');
+    $('act-' + u).textContent = b.activity || '—';
+    fill($('armor-' + u), [b.armor.helmet, b.armor.chestplate, b.armor.leggings, b.armor.boots]);
+    fill($('offhand-' + u), [b.offhand]);
+    fill($('main-' + u), b.main);
+    fill($('hotbar-' + u), b.hotbar, b.heldSlot);
+    $('hp-num-' + u).textContent = (Math.round(b.health * 10) / 10) + ' / 20';
+    $('hp-bar-' + u).style.width = (b.health / 20 * 100) + '%';
+    $('fd-num-' + u).textContent = b.food + ' / 20';
+    $('fd-bar-' + u).style.width = (b.food / 20 * 100) + '%';
+    $('xp-num-' + u).textContent = 'Lv ' + b.xpLevel;
+    $('xp-bar-' + u).style.width = (b.xpProgress * 100) + '%';
+    const p = b.position;
+    $('pos-' + u).textContent = 'X ' + p.x.toFixed(1) + ' / Y ' + p.y.toFixed(1) + ' / Z ' + p.z.toFixed(1);
+    $('dir-' + u).textContent = compass(b.yaw);
+  }
+  async function tick() {
+    try {
+      const r = await fetch('/api/state/all', { cache: 'no-store' });
+      const data = await r.json();
+      $('conn').textContent = data.bodies.map(b => b.username + (b.online ? ' ●' : ' ○')).join(' / ');
+      for (const b of data.bodies) {
+        if (!$('panel-' + b.username)) buildPanel(b);
+        updatePanel(b);
+      }
+      const first = data.bodies[0];
+      if (first && first.timeOfDay !== undefined) {
+        const hour = Math.floor(((first.timeOfDay / 1000) + 6) % 24);
+        const min = Math.floor((((first.timeOfDay / 1000) + 6) % 1) * 60);
+        $('gtime').textContent = 'ゲーム内 ' + hour + ':' + String(min).padStart(2, '0') + (first.isDay ? '（昼）' : '（夜）');
+      }
+      if (first && Array.isArray(first.logs)) {
+        $('logs').innerHTML = first.logs.map(l => l.replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('<br>');
+      }
+      if (first && first.memory) {
+        const mc = first.memory;
+        $('mem-chest').textContent = mc.chestContents && mc.chestContents.length ? mc.chestContents.map(i => i.name + '×' + i.count).join(', ') : (mc.chest ? '空' : 'なし');
+        $('mem-forest').textContent = mc.spots && mc.spots.forest ? ('X ' + mc.spots.forest.x + ' / Z ' + mc.spots.forest.z) : '—';
+        $('mem-stone').textContent = mc.spots && mc.spots.stone ? ('X ' + mc.spots.stone.x + ' / Z ' + mc.spots.stone.z) : '—';
+        $('mem-bed').textContent = mc.bed ? ('X ' + mc.bed.x + ' / Z ' + mc.bed.z) : 'なし';
+        $('mem-death').textContent = mc.lastDeath ? ('X ' + mc.lastDeath.x + ' / Z ' + mc.lastDeath.z + (mc.lastDeath.byMob ? '（モンスター）' : '')) : '—';
+      }
+      if (data.settings) SETTING_KEYS.forEach(k => { const el = $('set-' + k); if (el && document.activeElement !== el) el.checked = !!data.settings[k]; });
+    } catch (e) {
+      $('conn').innerHTML = '<span class="err">状態APIに接続できません</span>';
+    }
+  }
+  const SETTING_KEYS = ['autoEat', 'autoFight', 'autoPickup', 'nightSurvival', 'autoRecover', 'autoEquip', 'autoFish'];
+  SETTING_KEYS.forEach(k => {
+    const el = $('set-' + k);
+    if (el) el.addEventListener('change', async () => {
+      try {
+        const r = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k, value: el.checked }) });
+        if (!r.ok) throw new Error('ng');
+        const s = await r.json();
+        el.checked = !!s[k];
+      } catch (e) { el.checked = !el.checked; }
+    });
+  });
+  tick(); setInterval(tick, 2000);
+</script>
+</body>
+</html>
