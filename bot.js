@@ -552,7 +552,19 @@ async function pickaxeMission() {
         }
       }
       if (countPlanks() < 3) throw new Error('板材が3枚に届かない');
-      if (!await craftItem('wooden_pickaxe', 1)) throw new Error('木ピッケル失敗');
+      // On this slow CT a craft can silently no-op even with recipes + materials
+      // (craftItem's own retries included). Outer retries with a settle pause and
+      // a small stance shuffle clear the desync often enough.
+      let crafted = false;
+      for (let attempt = 0; attempt < 3 && !crafted; attempt++) {
+        if (attempt > 0) {
+          console.log(`[pickaxe] pickaxe craft outer retry ${attempt}`);
+          await new Promise(r => setTimeout(r, 5000));
+          try { const t = findCraftingTable(); if (t) await withTimeout(bot.pathfinder.goto(new goals.GoalNear(t.position.x, t.position.y, t.position.z, 1)), 20000, 'back to table'); } catch {}
+        }
+        crafted = await craftItem('wooden_pickaxe', 1);
+      }
+      if (!crafted) throw new Error('木ピッケル失敗');
     });
     const pick = bot.inventory.items().find(i => i.name === 'wooden_pickaxe');
     if (pick) { try { await bot.equip(pick, 'hand'); } catch {} }
