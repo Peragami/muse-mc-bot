@@ -128,7 +128,7 @@ function findBlocks(names, maxDist = 32, count = 20) {
   try { const ids = names.map(n => bot.registry.blocksByName[n]?.id).filter(x => x !== undefined); if (!ids.length) return []; return bot.findBlocks({ matching: ids, maxDistance: maxDist, count }); } catch { return []; }
 }
 function stopAll(reason = 'とまった') {
-  soloAbort = true; fishingMode = false; guardMode = false;
+  soloAbort = true; fishingMode = false; guardMode = false; nightMode = false;
   if (guardTimer) { clearInterval(guardTimer); guardTimer = null; }
   desiredState = 'idle'; targets.entity = null;
   try { bot.pathfinder.setGoal(null); } catch {}
@@ -1019,6 +1019,7 @@ function startStateServer() {
             const cmd = (JSON.parse(body).message || '').toString().slice(0, 100);
             if (!cmd) { res.writeHead(400); res.end('empty'); return; }
             console.log(`[dashboard] command: ${cmd}`);
+            if (cmd.startsWith('/')) { try { bot.chat(cmd); } catch {} res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: true })); return; }
             bot.emit('chat', 'Dashboard', cmd);
             res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
             res.end(JSON.stringify({ ok: true }));
@@ -1078,12 +1079,27 @@ async function nightSurvival() {
         // Whether it died or not, move on: wandering away is the escape.
       }
       if (!bot.entity) break;
-      const p = bot.entity.position;
+      const p = bot.entity.position.clone();
       const ang = Math.random() * Math.PI * 2;
       const dist = 14 + Math.random() * 10;
       const tx = p.x + Math.cos(ang) * dist, tz = p.z + Math.sin(ang) * dist;
       console.log(`[night] wander from (${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}) to (${tx.toFixed(1)}, ${tz.toFixed(1)})`);
+      const wStart = Date.now();
       try { await withTimeout(bot.pathfinder.goto(new goals.GoalNear(tx, p.y, tz, 2)), 20000, 'night wander'); console.log(`[night] wander arrived at (${bot.entity.position.x.toFixed(1)}, ${bot.entity.position.z.toFixed(1)})`); } catch (e) { console.log(`[night] wander failed: ${e.message}`); }
+      if (Date.now() - wStart < 1500 && bot.entity && bot.entity.position.distanceTo(p) < 1) {
+        // In some spots the pathfinder instantly "arrives" without moving
+        // (seen frozen at the old spawn hilltop): walk out with raw controls.
+        console.log('[night] wander made no progress — manual walk escape');
+        try {
+          const { Vec3 } = require('vec3');
+          await bot.lookAt(new Vec3(tx, bot.entity.position.y + 1.6, tz), true);
+          bot.setControlState('forward', true); bot.setControlState('jump', true);
+          await new Promise(r => setTimeout(r, 500));
+          bot.setControlState('jump', false);
+          await new Promise(r => setTimeout(r, 2000));
+          bot.clearControlStates();
+        } catch {}
+      }
       await new Promise(r => setTimeout(r, 500));
     }
   } catch (e) { console.log('[night] survival error:', e.message); }
@@ -1102,6 +1118,7 @@ bot.on('spawn', () => {
       if (settings.autoRecover && deathPos && !nearestHostile(12)) {
         const dp = deathPos; deathPos = null;
         say('落としたものを回収しに行くね');
+        autoBusy = true; // keep the auto tick out of the recovery's pathfinding
         desiredState = 'busy'; // goto only moves while busy (see nightSurvival note)
         try {
           await withTimeout(bot.pathfinder.goto(new goals.GoalNear(dp.x, dp.y, dp.z, 1)), 60000, 'recover drops');
@@ -1109,7 +1126,7 @@ bot.on('spawn', () => {
           console.log('[spawn] drop recovery walk done');
           say('回収できたはず。今の持ち物を確認してね');
         } catch (e) { console.log('[spawn] drop recovery failed:', e.message); }
-        finally { if (desiredState === 'busy') desiredState = 'idle'; }
+        finally { autoBusy = false; if (desiredState === 'busy') desiredState = 'idle'; }
       }
     } catch (e) { console.log('[spawn] respawn handler:', e.message); }
   }, 1500);
