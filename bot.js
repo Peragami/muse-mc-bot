@@ -438,22 +438,36 @@ async function buildBase() {
     if (!bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) { await pickaxeMission(); }
     if (soloAbort) return;
     await nightPause();
-    // 3) cobblestone for a furnace
-    if (countItem('cobblestone') < 8) await mineStoneManual(8 - countItem('cobblestone'));
-    if (soloAbort) return;
-    await nightPause();
-    // 4) mass-convert logs to planks (keep 5 logs)
-    const plankOf = {}; for (const t of LOG_TYPES) plankOf[t] = PLANK_OF[t];
-    let keep = 5;
-    for (const t of LOG_TYPES) {
-      while (countItem(t) > 0 && LOG_TYPES.reduce((a, x) => a + countItem(x), 0) > keep) {
-        const ok = await craftItem(plankOf[t], 1);
-        if (!ok) break;
-        if (soloAbort) return;
+    // 3) cobblestone for a furnace (one retry at a different spot: the soil
+    // can be deeper than the excavator's 7-block probe)
+    if (countItem('cobblestone') < 8) {
+      await mineStoneManual(8 - countItem('cobblestone'));
+      if (countItem('cobblestone') < 8 && !soloAbort) {
+        const p = bot.entity.position; desiredState = 'busy';
+        try { await gotoWatched(new goals.GoalNear(p.x + 14, p.y, p.z - 8, 3), 30000, 'relocate for stone'); } catch {}
+        if (desiredState === 'busy') desiredState = 'idle';
+        await mineStoneManual(8 - countItem('cobblestone'));
       }
     }
+    if (soloAbort) return;
+    await nightPause();
+    // 4) mass-convert logs to planks (keep 4 logs for charcoal). Loop by
+    // target count, not by live log counts: right after a craft the
+    // inventory can momentarily read 0 logs (sync lag) and a count-driven
+    // loop exits after a single craft (seen live 2026-11-23).
+    const toConvert = Math.max(0, countLogs() - 4);
+    let converted = 0, noProgress = 0;
+    while (converted < toConvert && noProgress < 3) {
+      const lt = LOG_TYPES.map(t => ({ t, c: countItem(t) })).sort((a, b) => b.c - a.c)[0];
+      if (!lt || lt.c <= 0) { await new Promise(r => setTimeout(r, 2000)); noProgress++; continue; }
+      const beforeLogs = countLogs();
+      const ok = await craftItem(PLANK_OF[lt.t], 1);
+      await new Promise(r => setTimeout(r, 1500));
+      if (ok || countLogs() < beforeLogs) { converted++; noProgress = 0; } else noProgress++;
+      if (soloAbort) return;
+    }
     const plankType = Object.values(PLANK_OF).map(pn => ({ pn, c: countItem(pn) })).sort((a, b) => b.c - a.c)[0];
-    if (!plankType || plankType.c < 70) { say(`板材が足りない（${plankType ? plankType.c : 0}枚）ので中止するね`); return; }
+    if (!plankType || plankType.c < 55) { say(`板材が足りない（${plankType ? plankType.c : 0}枚）ので中止するね`); return; }
     const planks = plankType.pn;
     console.log(`[base] building with ${planks} x${plankType.c}`);
     // 5) crafts: furnace, sticks+charcoal+torches, door, chest, table, bed?
