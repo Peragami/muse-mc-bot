@@ -139,6 +139,7 @@
       <div class="srow"><span>お腹が減ったら自動で食べる</span><label class="switch"><input type="checkbox" id="set-autoEat"><span class="track"></span></label></div>
       <div class="srow"><span>近くのモンスターを自動で倒す</span><label class="switch"><input type="checkbox" id="set-autoFight"><span class="track"></span></label></div>
       <div class="srow"><span>ドロップ品を自動で拾いに行く</span><label class="switch"><input type="checkbox" id="set-autoPickup"><span class="track"></span></label></div>
+      <div class="srow"><span>昼間ひまなとき自動で釣り</span><label class="switch"><input type="checkbox" id="set-autoFish"><span class="track"></span></label></div>
       <div class="srow"><span>夜は拠点に帰る（なければ動き回る）</span><label class="switch"><input type="checkbox" id="set-nightSurvival"><span class="track"></span></label></div>
       <div class="srow"><span>死んだら落下物を取りに戻る</span><label class="switch"><input type="checkbox" id="set-autoRecover"><span class="track"></span></label></div>
       <div class="srow"><span>防具を自動で装備する</span><label class="switch"><input type="checkbox" id="set-autoEquip"><span class="track"></span></label></div>
@@ -256,7 +257,7 @@
   document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => sendCmd(b.dataset.cmd)));
   $('cmd-send').addEventListener('click', () => { sendCmd($('cmd-input').value); $('cmd-input').value = ''; });
   $('cmd-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { sendCmd($('cmd-input').value); $('cmd-input').value = ''; } });
-  const SETTING_KEYS = ['autoEat', 'autoFight', 'autoPickup', 'nightSurvival', 'autoRecover', 'autoEquip'];
+  const SETTING_KEYS = ['autoEat', 'autoFight', 'autoPickup', 'nightSurvival', 'autoRecover', 'autoEquip', 'autoFish'];
   async function loadSettings() {
     try {
       const r = await fetch('/api/settings', { cache: 'no-store' });
