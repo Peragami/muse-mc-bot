@@ -409,20 +409,23 @@ async function buildBase() {
   baseMode = true; soloAbort = false; nightMode = false;
   say('拠点を作るね。まず材料を集めるよ');
   try {
-    // 1) logs (keep 5 unconverted for charcoal)
-    let logs = LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
-    if (logs < 26) {
-      await collectByNames(LOG_TYPES, 26 - logs, '原木', 48);
-      logs = LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
-      if (logs < 14) { // relocate once and retry
+    // 1) logs (keep 5 unconverted for charcoal). Gather in small batches:
+    // one big collect call keeps timing out its pathfinding on this server,
+    // and the inventory count lags a few seconds behind a failed collect.
+    const countLogs = () => LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
+    for (let round = 0; round < 8 && countLogs() < 26; round++) {
+      const before = countLogs();
+      await collectByNames(LOG_TYPES, Math.min(5, 26 - before), '原木', 40);
+      await new Promise(r => setTimeout(r, 3000));
+      if (countLogs() <= before && round >= 1) {
         const p = bot.entity.position; desiredState = 'busy';
-        try { await gotoWatched(new goals.GoalNear(p.x + 25, p.y, p.z + 10, 3), 30000, 'relocate for logs'); } catch {}
+        try { await gotoWatched(new goals.GoalNear(p.x + (Math.random() * 40 - 20), p.y, p.z + (Math.random() * 40 - 20), 3), 30000, 'relocate for logs'); } catch {}
         if (desiredState === 'busy') desiredState = 'idle';
-        await collectByNames(LOG_TYPES, 26 - logs, '原木', 48);
-        logs = LOG_TYPES.reduce((a, t) => a + countItem(t), 0);
       }
-      if (logs < 14) { say('原木が足りなくて拠点は無理だった'); return; }
+      if (soloAbort) return;
     }
+    await new Promise(r => setTimeout(r, 2000));
+    if (countLogs() < 22) { say('原木が足りなくて拠点は無理だった'); return; }
     // 2) wooden pickaxe (for cobblestone)
     if (!bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) { await pickaxeMission(); }
     if (soloAbort) return;
@@ -479,14 +482,14 @@ async function buildBase() {
       const isPerim = x === ox || x === ox + 4 || z === oz || z === oz + 4;
       if (!isPerim) continue;
       const gy = groundYAt(x, z, baseY);
-      for (let y = gy + 1; y <= baseY; y++) await placeBlockAt(x, y, z, planks);
+      for (let y = gy + 1; y <= baseY; y++) await placeBlockAt(x, y, z, planks).catch(() => false);
     }
     for (let row = 1; row <= 3; row++) {
       for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) {
         const isPerim = x === ox || x === ox + 4 || z === oz || z === oz + 4;
         if (!isPerim) continue;
         if (x === doorX && z === doorZ && row <= 2) continue; // doorway
-        await placeBlockAt(x, baseY + row, z, planks);
+        await placeBlockAt(x, baseY + row, z, planks).catch(() => false);
         if (soloAbort) break;
       }
       if (soloAbort) break;
@@ -494,7 +497,7 @@ async function buildBase() {
     if (soloAbort) return;
     // 8) step inside, then roof
     try { await gotoWatched(new goals.GoalNear(ox + 2, baseY + 1, oz + 2, 1), 30000, 'enter base'); } catch (e) { console.log('[base] enter failed:', e.message); }
-    for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) { await placeBlockAt(x, baseY + 4, z, planks); if (soloAbort) break; }
+    for (let x = ox; x < ox + 5; x++) for (let z = oz; z < oz + 5; z++) { await placeBlockAt(x, baseY + 4, z, planks).catch(() => false); if (soloAbort) break; }
     if (soloAbort) return;
     // 9) door, furniture, torches
     if (countItem(doorName) > 0) await placeBlockAt(doorX, baseY + 1, doorZ, doorName);
