@@ -10,6 +10,7 @@ Environment=MC_HOST=127.0.0.1
 Environment=MC_PORT=25565
 Environment=MC_USER=Muze
 Environment=VIEWER_PORT=3007
+ExecStartPre=/bin/bash -c 'for i in $(seq 1 60); do (exec 3<>/dev/tcp/127.0.0.1/25565) 2>/dev/null && exit 0; sleep 2; done; exit 1'
 ExecStart=/usr/bin/node bot.js
 Restart=on-failure
 RestartSec=10
