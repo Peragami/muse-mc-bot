@@ -199,6 +199,7 @@ async function collectByNames(names, count, label, maxDist = 32) {
   try { await withTimeout(bot.collectBlock.collect(blocks), 90000, label); }
   catch (e) { console.log(`[collect] ${label}: ${e.message} (partial progress may remain in inventory)`); try { await bot.collectBlock.cancelTask(); } catch {} }
   finally { if (desiredState === 'busy') desiredState = 'idle'; }
+  if (blocks.length > 0 && names.some(n => LOG_TYPES.includes(n))) rememberSpot('forest');
   return blocks.length;
 }
 // Manual stone mining. Do NOT use collectblock for stone: its vein flood-fill treats
@@ -251,6 +252,7 @@ async function mineStoneManual(count = 3) {
     } catch (e) { console.log('[stone] dig failed:', e.message); break; }
     if (soloAbort) break;
   }
+  if (dug > 0) rememberSpot('stone');
   return dug;
 }
 // Place an inventory block on top of a solid neighbour cell whose top is air.
@@ -426,7 +428,12 @@ async function buildBase() {
       await new Promise(r => setTimeout(r, 3000));
       if (countLogs() <= before && round >= 1) {
         const p = bot.entity.position; desiredState = 'busy';
-        try { await gotoWatched(new goals.GoalNear(p.x + (Math.random() * 40 - 20), p.y, p.z + (Math.random() * 40 - 20), 3), 30000, 'relocate for logs'); } catch {}
+        // Use its memory: if it remembers a forest spot, head there instead
+        // of wandering randomly.
+        const fs = memory.spots.forest;
+        const useFs = fs && Math.hypot(fs.x - p.x, fs.z - p.z) > 12;
+        if (useFs) console.log('[base] relocating to remembered forest spot');
+        try { await gotoWatched(new goals.GoalNear(useFs ? fs.x : p.x + (Math.random() * 40 - 20), p.y, useFs ? fs.z : p.z + (Math.random() * 40 - 20), 3), 30000, 'relocate for logs'); } catch {}
         if (desiredState === 'busy') desiredState = 'idle';
       }
       if (soloAbort) return;
@@ -535,6 +542,7 @@ async function buildBase() {
     // 10) register home
     settings.home = { x: ox + 2, y: baseY + 1, z: oz + 2 };
     saveSettings();
+    try { findHomeChest(); } catch {}
     console.log(`[base] done. home=${JSON.stringify(settings.home)}`);
     say(`拠点ができたよ（${settings.home.x}, ${settings.home.y}, ${settings.home.z}）。夜はここに帰るね`);
   } catch (e) { console.log('[base] failed:', e.message); say('拠点づくりに失敗しちゃった'); }
@@ -709,21 +717,63 @@ function nearestPrey(range = 24) {
   return es[0] || null;
 }
 async function depositToChest() {
-  const pos = findBlocks(['chest','trapped_chest'], 32, 1);
-  if (!pos.length) { say('近くにチェストが見つからない'); return; }
+  // Prefer the remembered home chest (walk home first if needed); fall back
+  // to any chest nearby. Afterwards the chest contents are remembered.
   try {
     desiredState = 'busy';
-    const chestBlock = bot.blockAt(pos[0]);
-    await bot.pathfinder.goto(new goals.GoalNear(chestBlock.position.x, chestBlock.position.y, chestBlock.position.z, 2));
+    let chestBlock = null;
+    if (settings.home && bot.entity) {
+      const dHome = Math.hypot(bot.entity.position.x - settings.home.x, bot.entity.position.z - settings.home.z);
+      if (dHome > 6) { try { await goHome(); } catch {} }
+      chestBlock = findHomeChest();
+    }
+    if (!chestBlock) {
+      const pos = findBlocks(['chest', 'trapped_chest'], 32, 1);
+      if (!pos.length) { say('近くにチェストが見つからない'); return; }
+      chestBlock = bot.blockAt(pos[0]);
+      if (chestBlock) { memory.chest = { x: chestBlock.position.x, y: chestBlock.position.y, z: chestBlock.position.z }; saveMemory(); }
+    }
+    if (!chestBlock) { say('チェストが見つからない'); return; }
+    await gotoWatched(new goals.GoalNear(chestBlock.position.x, chestBlock.position.y, chestBlock.position.z, 2), 30000, 'to chest');
     const chest = await bot.openContainer(chestBlock);
     let n = 0;
     for (const item of [...bot.inventory.items()]) {
       if (DEPOSIT_KEEP(item.name) || isFood(item.name)) continue;
       try { await chest.deposit(item.type, null, item.count); n += item.count; } catch (e) { console.log('[deposit]', item.name, e.message); }
     }
+    snapshotChest(chest);
     try { chest.close(); } catch {}
     say(n ? `素材を${n}個預けた` : '預けるものがなかった（食料とツールは手元に残す）');
   } catch (e) { fail('預けられなかった', e); } finally { if (desiredState === 'busy') desiredState = 'idle'; }
+}
+async function withdrawFromChest(query) {
+  const name = JP_ITEMS[query] || query;
+  if (!settings.home) { say('拠点がまだないからチェストもないよ'); return; }
+  try {
+    desiredState = 'busy';
+    await goHome();
+    const chestBlock = findHomeChest();
+    if (!chestBlock) { say('拠点のチェストが見つからない'); return; }
+    await gotoWatched(new goals.GoalNear(chestBlock.position.x, chestBlock.position.y, chestBlock.position.z, 2), 30000, 'to chest');
+    const chest = await bot.openContainer(chestBlock);
+    const item = chest.items().find(i => i.name === name) || chest.items().find(i => i.name.includes(name));
+    if (!item) { snapshotChest(chest); try { chest.close(); } catch {} say(`${query}はチェストに入ってない`); return; }
+    const cnt = item.count;
+    await chest.withdraw(item.type, null, cnt);
+    snapshotChest(chest);
+    try { chest.close(); } catch {}
+    say(`${item.name}を${cnt}個取り出した`);
+  } catch (e) { fail('取り出せなかった', e); } finally { if (desiredState === 'busy') desiredState = 'idle'; }
+}
+function sayMemory() {
+  const parts = [];
+  if (settings.home) parts.push(`拠点は(${settings.home.x}, ${settings.home.y}, ${settings.home.z})`);
+  if (memory.chest) parts.push(`チェストには${memory.chestContents.reduce((a, i) => a + i.count, 0)}個入ってる`);
+  if (memory.spots.forest) parts.push(`木は(${memory.spots.forest.x}, ${memory.spots.forest.z})の辺りで取れた`);
+  if (memory.spots.stone) parts.push(`石は(${memory.spots.stone.x}, ${memory.spots.stone.z})で掘れた`);
+  const d = memory.deaths[memory.deaths.length - 1];
+  if (d) parts.push(`最後に死んだのは(${d.x}, ${d.z})`);
+  say(parts.length ? '覚えてること: ' + parts.join('、') : 'まだ何も覚えてない');
 }
 const JP_ITEMS = { '木':'oak_log','原木':'oak_log','板材':'oak_planks','石':'cobblestone','鉄':'iron_ingot','棒':'stick','作業台':'crafting_table','松明':'torch','パン':'bread' };
 async function giveItem(username, query) {
@@ -1193,6 +1243,53 @@ function saveSettings() {
 }
 loadSettings();
 
+// ---- persistent memory (memory.json) ----
+// The bot remembers where its chest is and what is inside it, where it
+// found trees and stone, and where it died — across restarts
+// (user request 2026-11-23: 「記憶力も欲しい」).
+const MEMORY_PATH = path2.join(__dirname, 'memory.json');
+const memory = { chest: null, chestContents: [], spots: {}, deaths: [] };
+function loadMemory() {
+  try {
+    const j = JSON.parse(fs2.readFileSync(MEMORY_PATH, 'utf8'));
+    if (j.chest && typeof j.chest.x === 'number') memory.chest = j.chest;
+    if (Array.isArray(j.chestContents)) memory.chestContents = j.chestContents;
+    if (j.spots && typeof j.spots === 'object') memory.spots = j.spots;
+    if (Array.isArray(j.deaths)) memory.deaths = j.deaths;
+  } catch {}
+  console.log('[memory] loaded: chest=' + JSON.stringify(memory.chest) + ' spots=' + Object.keys(memory.spots).join(',') + ' deaths=' + memory.deaths.length);
+}
+function saveMemory() {
+  try { fs2.writeFileSync(MEMORY_PATH, JSON.stringify(memory, null, 2)); } catch (e) { console.log('[memory] save failed:', e.message); }
+}
+loadMemory();
+function rememberSpot(kind) {
+  try {
+    if (!bot.entity) return;
+    const p = bot.entity.position;
+    memory.spots[kind] = { x: Math.floor(p.x), y: Math.floor(p.y), z: Math.floor(p.z), at: Date.now() };
+    saveMemory();
+    console.log(`[memory] remembered ${kind} spot (${memory.spots[kind].x}, ${memory.spots[kind].z})`);
+  } catch {}
+}
+function findHomeChest() {
+  // Locate the chest at the base (bot must be near home) and remember it.
+  if (!settings.home) return null;
+  const found = findBlocks(['chest', 'trapped_chest'], 24, 4);
+  const blocks = found.map(p => bot.blockAt(p)).filter(Boolean);
+  blocks.sort((a, b) => (Math.abs(a.position.x - settings.home.x) + Math.abs(a.position.z - settings.home.z)) - (Math.abs(b.position.x - settings.home.x) + Math.abs(b.position.z - settings.home.z)));
+  if (blocks.length) {
+    const np = { x: blocks[0].position.x, y: blocks[0].position.y, z: blocks[0].position.z };
+    if (JSON.stringify(memory.chest) !== JSON.stringify(np)) { memory.chest = np; saveMemory(); console.log('[memory] home chest at', JSON.stringify(np)); }
+    return blocks[0];
+  }
+  if (memory.chest) { const { Vec3 } = require('vec3'); return bot.blockAt(new Vec3(memory.chest.x, memory.chest.y, memory.chest.z)); }
+  return null;
+}
+function snapshotChest(container) {
+  try { memory.chestContents = container.items().map(i => ({ name: i.name, count: i.count })); saveMemory(); console.log('[memory] chest snapshot:', memory.chestContents.map(i => `${i.name}x${i.count}`).join(', ') || '(empty)'); } catch {}
+}
+
 // ---- auto behaviors (dashboard-toggleable) ----
 let autoBusy = false;
 let lastEatAt = 0;
@@ -1354,6 +1451,7 @@ function botState() {
     online: !!bot.entity,
     activity: nightMode ? (homeWaitMode ? '🏠 拠点で待機中' : '🌙 夜間サバイバル中') : anyMissionActive() ? 'ミッション中' : (autoBusy && autoLabel ? autoLabel : '待機中'),
     home: settings.home || null,
+    memory: { chest: memory.chest, chestContents: memory.chestContents, spots: memory.spots, lastDeath: memory.deaths[memory.deaths.length - 1] || null },
     logs: logBuf.slice(-15)
   };
 }
@@ -1427,7 +1525,7 @@ bot.once('spawn', () => {
   if (process.env.AUTO_SWORD === '1') setTimeout(() => swordMission(), 4000);
   if (process.env.AUTO_ARMOR === '1') setTimeout(() => armorMission(), 4000);
 });
-bot.on('death', () => { try { lastDeathByMob = !!nearestHostile(16); } catch { lastDeathByMob = false; } try { deathPos = bot.entity.position.clone(); console.log(`[death] at ${deathPos} (byMob=${lastDeathByMob})`); } catch {} soloAbort = true; fishingMode = false; guardMode = false; deathTimes.push(Date.now()); deathTimes = deathTimes.filter(t => Date.now() - t < 3 * 60 * 1000); if (deathTimes.length >= 3) console.log(`[death] loop detected: ${deathTimes.length} deaths in 3 min`); });
+bot.on('death', () => { try { lastDeathByMob = !!nearestHostile(16); } catch { lastDeathByMob = false; } try { deathPos = bot.entity.position.clone(); console.log(`[death] at ${deathPos} (byMob=${lastDeathByMob})`); } catch {} try { if (deathPos) { memory.deaths.push({ x: Math.floor(deathPos.x), y: Math.floor(deathPos.y), z: Math.floor(deathPos.z), byMob: lastDeathByMob, at: Date.now() }); memory.deaths = memory.deaths.slice(-5); saveMemory(); } } catch {} soloAbort = true; fishingMode = false; guardMode = false; deathTimes.push(Date.now()); deathTimes = deathTimes.filter(t => Date.now() - t < 3 * 60 * 1000); if (deathTimes.length >= 3) console.log(`[death] loop detected: ${deathTimes.length} deaths in 3 min`); });
 
 // ---- night survival + death-loop protection ----
 // Incident 2026-11-23: after finishing a mission at dusk the bot idled in the
@@ -1456,6 +1554,8 @@ async function nightSurvival() {
     const ok = await goHome().catch(() => false);
     if (ok && nightMode) {
       homeWaitMode = true;
+      // Home for the night: put surplus materials away in the chest.
+      try { await depositToChest(); } catch (e) { console.log('[night] deposit failed:', e.message); }
       try {
         while (nightMode && bot.time && !bot.time.isDay) {
           const h = nearestHostile(3);
@@ -1573,7 +1673,7 @@ bot.on('kicked', (r) => console.log('kicked:', r));
 bot.on('error', (e) => console.log('error:', e.message));
 bot.on('end', (r) => console.log('disconnected:', r));
 
-const HELP = ['ヘルプ: ついてきて/こっちきて/とまれ/木切って/石掘って/鉄掘って/たたかって/まもって/装備して/食べて/もちもの/寝て/釣って/◯◯作って/もどって/預けて/木ちょうだい/一人でサバイバル/拠点つくって/うちかえる'];
+const HELP = ['ヘルプ: ついてきて/こっちきて/とまれ/木切って/石掘って/鉄掘って/たたかって/まもって/装備して/食べて/もちもの/寝て/釣って/◯◯作って/もどって/預けて/〇〇出して/覚えてること/木ちょうだい/一人でサバイバル/拠点つくって/うちかえる'];
 
 // ---- chat commands ----
 bot.on('chat', async (username, message) => {
@@ -1595,6 +1695,9 @@ bot.on('chat', async (username, message) => {
       try { await bot.pathfinder.goto(new goals.GoalNear(deathPos.x, deathPos.y, deathPos.z, 2)); say('着いた'); } catch (e) { fail('戻れなかった', e); } finally { if (desiredState==='busy') desiredState='idle'; } return;
     }
     if (msg.includes('預けて')) { depositToChest(); return; }
+    if (msg.includes('覚えてる') || msg === '記憶') { sayMemory(); return; }
+    const wm = msg.match(/^(.+?)(出して|取ってきて|とってきて)$/);
+    if (wm && wm[1].trim()) { withdrawFromChest(wm[1].trim()); return; }
     const giveMatch = msg.match(/^(?:渡して)\s*(\S+)$/) || (msg.includes('ちょうだい') ? [null, msg.replace('ちょうだい','').trim() || '木'] : null);
     if (giveMatch) { giveItem(username, giveMatch[1]); return; }
     // wooden pickaxe: full chain from gathering (plain craftItem has no materials to work with)

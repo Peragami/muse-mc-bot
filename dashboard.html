@@ -81,6 +81,8 @@
   <button data-cmd="一人でサバイバル">一人でサバイバル</button>
   <button data-cmd="拠点つくって">🏠 拠点つくって</button>
   <button data-cmd="うちかえる">拠点へ帰る</button>
+  <button data-cmd="預けて">チェストに預ける</button>
+  <button data-cmd="覚えてること">覚えてること</button>
   <button data-cmd="とまれ">とまれ</button>
   <input id="cmd-input" type="text" placeholder="コマンドを入力（例：木のツルハシ作って）" maxlength="100">
   <button id="cmd-send">送信</button>
@@ -142,6 +144,13 @@
     <div class="info">
       <h2>ログ（最新15件）</h2>
       <div id="logs" style="font-size:11px;line-height:1.5;color:#bdbdc7;word-break:break-all;">—</div>
+    </div>
+    <div class="info">
+      <h2>記憶</h2>
+      <div class="row"><span>チェストの中身</span><span id="mem-chest">—</span></div>
+      <div class="row"><span>木が取れた場所</span><span id="mem-forest">—</span></div>
+      <div class="row"><span>石が掘れた場所</span><span id="mem-stone">—</span></div>
+      <div class="row"><span>最後に死んだ場所</span><span id="mem-death">—</span></div>
     </div>
   </div>
   <div class="right">
@@ -212,6 +221,13 @@
       $('home').textContent = s.home ? ('X ' + s.home.x + ' / Y ' + s.home.y + ' / Z ' + s.home.z) : 'なし';
       if (Array.isArray(s.logs)) {
         $('logs').innerHTML = s.logs.map(l => l.replace(/&/g, '&amp;').replace(/</g, '&lt;')).join('<br>');
+      }
+      if (s.memory) {
+        const mc = s.memory;
+        $('mem-chest').textContent = mc.chestContents && mc.chestContents.length ? mc.chestContents.map(i => i.name + '×' + i.count).join(', ') : (mc.chest ? '空' : 'なし');
+        $('mem-forest').textContent = mc.spots && mc.spots.forest ? ('X ' + mc.spots.forest.x + ' / Z ' + mc.spots.forest.z) : '—';
+        $('mem-stone').textContent = mc.spots && mc.spots.stone ? ('X ' + mc.spots.stone.x + ' / Z ' + mc.spots.stone.z) : '—';
+        $('mem-death').textContent = mc.lastDeath ? ('X ' + mc.lastDeath.x + ' / Z ' + mc.lastDeath.z + (mc.lastDeath.byMob ? '（モンスター）' : '')) : '—';
       }
     } catch (e) {
       $('conn').innerHTML = '<span class="err">状態APIに接続できません</span>';
