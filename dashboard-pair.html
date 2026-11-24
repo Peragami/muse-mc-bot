@@ -80,7 +80,7 @@
     <button data-tp="178,95,-105">拠点の上空</button>
     <span class="sent" id="cam-sent"></span>
   </div>
-  <div style="padding:0 12px 10px;font-size:12px;color:#9a9aa5">操作中: マウスで視点 / WASDで移動（見る方向へ飛びます） / Space・Eで上昇 / C・Qで下降 / Shiftでダッシュ / Escで終了</div>
+  <div style="padding:0 12px 10px;font-size:12px;color:#9a9aa5">操作中: マウスで視点 / WASDで移動（見る方向へ飛びます） / Space・Eで上昇 / C・Qで下降 / Shiftでダッシュ / ホイールで速度調整 / Escで終了</div>
 </div>
 <div class="panels" id="panels"></div>
 <div class="shared">
@@ -338,7 +338,7 @@
 
   // ---- spectator free-fly control (pointer lock + WASD) ----
   const camOverlay = $('cam-overlay');
-  const ctl = { yaw: 0, pitch: 0, keys: {}, ws: null, timer: null };
+  const ctl = { yaw: 0, pitch: 0, keys: {}, ws: null, timer: null, speedMul: 1 };
   function camWsUrl() { return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':3028/'; }
   async function syncLook() {
     try {
@@ -350,7 +350,7 @@
   function sendCtl() {
     if (!ctl.ws || ctl.ws.readyState !== 1) return;
     const k = ctl.keys;
-    try { ctl.ws.send(JSON.stringify({ yaw: ctl.yaw, pitch: ctl.pitch, f: !!k.KeyW, b: !!k.KeyS, l: !!k.KeyA, r: !!k.KeyD, up: !!(k.Space || k.KeyE), down: !!(k.KeyC || k.KeyQ), boost: !!(k.ShiftLeft || k.ShiftRight) })); } catch (e) { /* socket closing */ }
+    try { ctl.ws.send(JSON.stringify({ yaw: ctl.yaw, pitch: ctl.pitch, f: !!k.KeyW, b: !!k.KeyS, l: !!k.KeyA, r: !!k.KeyD, up: !!(k.Space || k.KeyE), down: !!(k.KeyC || k.KeyQ), boost: !!(k.ShiftLeft || k.ShiftRight), speedMul: ctl.speedMul })); } catch (e) { /* socket closing */ }
   }
   camOverlay.addEventListener('click', async () => { await syncLook(); camOverlay.requestPointerLock(); });
   document.addEventListener('pointerlockchange', () => {
@@ -374,6 +374,13 @@
     ctl.pitch = Math.max(-1.55, Math.min(1.55, ctl.pitch));
     sendCtl();
   });
+  document.addEventListener('wheel', (e) => {
+    if (document.pointerLockElement !== camOverlay) return;
+    // Spectator-style: the wheel adjusts fly speed.
+    ctl.speedMul = Math.max(0.25, Math.min(4, ctl.speedMul * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
+    $('cam-sent').textContent = '飛行速度 ×' + ctl.speedMul.toFixed(2).replace(/0$/, '');
+    sendCtl();
+  }, { passive: true });
   document.addEventListener('keydown', (e) => {
     if (document.pointerLockElement !== camOverlay) return;
     ctl.keys[e.code] = true;
