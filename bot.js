@@ -36,7 +36,7 @@ function wireLifecycle(ctx, cfg) {
     // holes through the hut walls instead of using the door, which
     // the damage watcher kept recording as mystery destruction
     // (evidence 2026-11-24). All real digging is explicit bot.dig.
-    try { const mv = new Movements(bot); mv.canDig = false; bot.pathfinder.setMovements(mv); } catch {}
+    try { const mv = new Movements(bot); mv.canDig = false; mv.canOpenDoors = true; bot.pathfinder.setMovements(mv); } catch {}
     ctx.setupStateMachine(); ctx.startViewer(); ctx.startStateServer();
     ctx.say(cfg.primary ? 'ねむ、来たよ' : 'ゆめ、来たよ');
     console.log(`spawned as ${cfg.username} at ${bot.entity.position}`);
