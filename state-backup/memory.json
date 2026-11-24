@@ -1,8 +1,8 @@
 {
  "bed": {
-  "x": 179,
+  "x": 177,
   "y": 71,
-  "z": -105
+  "z": -104
  },
  "chest": {
   "x": 178,
@@ -11,105 +11,153 @@
  },
  "chestContents": [
   {
-   "count": 2,
-   "name": "oak_log"
+   "count": 64,
+   "name": "cobblestone"
+  },
+  {
+   "count": 6,
+   "name": "stick"
+  },
+  {
+   "count": 1,
+   "name": "white_banner"
   },
   {
    "count": 5,
    "name": "string"
   },
   {
-   "count": 2,
-   "name": "egg"
-  },
-  {
-   "count": 9,
-   "name": "birch_sapling"
-  },
-  {
-   "count": 24,
-   "name": "stick"
-  },
-  {
-   "count": 7,
+   "count": 19,
    "name": "oak_planks"
   },
   {
-   "count": 2,
-   "name": "birch_log"
+   "count": 27,
+   "name": "dirt"
   },
   {
-   "count": 4,
-   "name": "feather"
+   "count": 1,
+   "name": "light_gray_wool"
+  },
+  {
+   "count": 3,
+   "name": "wheat_seeds"
+  },
+  {
+   "count": 1,
+   "name": "water_bucket"
+  },
+  {
+   "count": 1,
+   "name": "chest"
   },
   {
    "count": 6,
-   "name": "birch_planks"
-  },
-  {
-   "count": 11,
-   "name": "oak_sapling"
-  },
-  {
-   "count": 10,
-   "name": "bone"
+   "name": "birch_log"
   },
   {
    "count": 7,
+   "name": "granite"
+  },
+  {
+   "count": 5,
+   "name": "feather"
+  },
+  {
+   "count": 12,
+   "name": "birch_sapling"
+  },
+  {
+   "count": 11,
+   "name": "cobblestone"
+  },
+  {
+   "count": 22,
+   "name": "oak_log"
+  },
+  {
+   "count": 16,
+   "name": "bone"
+  },
+  {
+   "count": 3,
+   "name": "egg"
+  },
+  {
+   "count": 64,
+   "name": "dirt"
+  },
+  {
+   "count": 1,
+   "name": "crossbow"
+  },
+  {
+   "count": 6,
+   "name": "leather"
+  },
+  {
+   "count": 1,
+   "name": "bow"
+  },
+  {
+   "count": 30,
    "name": "arrow"
   },
   {
    "count": 1,
-   "name": "torch"
-  },
-  {
-   "count": 56,
-   "name": "dirt"
-  },
-  {
-   "count": 5,
-   "name": "cobblestone"
-  },
-  {
-   "count": 3,
-   "name": "white_wool"
-  },
-  {
-   "count": 1,
-   "name": "crafting_table"
+   "name": "gunpowder"
   }
  ],
  "lastDeath": {
-  "at": 1795460665053,
+  "at": 1795553038461,
   "byMob": true,
-  "x": 174,
-  "y": 67,
+  "x": 177,
+  "y": 68,
   "z": -101
  },
  "spots": {
   "forest": {
-   "at": 1795460711732,
-   "x": 93,
-   "y": 70,
-   "z": -68
+   "at": 1795548870545,
+   "x": 124,
+   "y": 74,
+   "z": -92
+  },
+  "lake": {
+   "x": 168,
+   "y": 62,
+   "z": -7
+  },
+  "pond": {
+   "floorY": 67,
+   "ox": 194,
+   "oz": -135
+  },
+  "sheep": {
+   "at": 1795506332170,
+   "x": 86,
+   "y": 71,
+   "z": -133
   },
   "spider": {
-   "at": 1795436872648,
-   "x": 176,
-   "y": 65,
-   "z": -105
+   "at": 1795541543230,
+   "x": 162,
+   "y": 71,
+   "z": -67
   },
   "stone": {
-   "at": 1795442233858,
-   "x": 196,
-   "y": 60,
-   "z": -89
+   "at": 1795546544541,
+   "x": 216,
+   "y": 59,
+   "z": -66
   },
   "water": {
-   "at": 1795440060985,
-   "x": 209,
-   "y": 66,
-   "z": -153
+   "x": 196,
+   "y": 69,
+   "z": -133
+  },
+  "well": {
+   "x": 191,
+   "y": 70,
+   "z": -134
   }
  }
 }
