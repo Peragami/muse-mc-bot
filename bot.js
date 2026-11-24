@@ -17,8 +17,8 @@
 const createCtx = require('./lib/context');
 
 const BODIES = [
-  { username: 'Nemu', viewerPort: 3007, statePort: 3008, callName: 'ねむ', primary: true },
-  { username: 'Yume', viewerPort: 3017, statePort: 3018, callName: 'ゆめ', primary: false },
+  { username: 'Nemu', viewerPort: 3007, statePort: 3008, callName: 'ねむ', primary: true, orbitPort: 3037 },
+  { username: 'Yume', viewerPort: 3017, statePort: 3018, callName: 'ゆめ', primary: false, orbitPort: 3047 },
 ];
 const MODULES = ['./lib/world', './lib/coop', './lib/craft', './lib/home', './lib/missions', './lib/life', './lib/dashboard', './lib/chat'];
 
