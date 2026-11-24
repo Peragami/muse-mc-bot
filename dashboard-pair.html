@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>むぜ＆ゆめ ダッシュボード</title>
+<title>ねむ＆ゆめ ダッシュボード</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #1b1b21; color: #e8e8e8; font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; padding: 12px; }
@@ -58,11 +58,14 @@
   .switch input:checked + .track { background: #4caf50; }
   .switch input:checked + .track:before { transform: translateX(18px); }
   .err { color: #e5484d; font-size: 12px; }
+  .panel.danger { border-color: #e5484d; animation: dangerPulse 1.2s ease-in-out infinite; }
+  @keyframes dangerPulse { 50% { box-shadow: 0 0 14px rgba(229, 72, 77, .8); } }
+  #map { width: 100%; max-width: 340px; background: #1b1b21; border: 1px solid #3a3a44; display: block; }
 </style>
 </head>
 <body>
 <header>
-  <h1>むぜ＆ゆめ ダッシュボード</h1>
+  <h1>ねむ＆ゆめ ダッシュボード</h1>
   <span id="gtime" style="font-size:13px;color:#bdbdc7;">—</span>
   <span id="conn" style="font-size:12px;color:#9a9aa5;">接続中…</span>
 </header>
@@ -87,14 +90,26 @@
     <div class="row"><span>最後に死んだ場所</span><span id="mem-death">—</span></div>
   </div>
   <div class="info">
+    <h2>いまの共有状況</h2>
+    <div id="shared-status">—</div>
+  </div>
+  <div class="info">
+    <h2>マップ（スポットと2人の位置）</h2>
+    <canvas id="map" width="340" height="260"></canvas>
+  </div>
+  <div class="info">
+    <h2>イベント（出来事の履歴）</h2>
+    <div id="events" style="font-size:11px;line-height:1.5;color:#bdbdc7;word-break:break-all;">—</div>
+  </div>
+  <div class="info">
     <h2>ログ（最新15件）</h2>
     <div id="logs" style="font-size:11px;line-height:1.5;color:#bdbdc7;word-break:break-all;">—</div>
   </div>
 </div>
 <script>
   const $ = (id) => document.getElementById(id);
-  const ACCENTS = { Muze: '#7ec8e3', Yume: '#f2a7c3' };
-  const QUICK = ['うちかえる', '預けて', '釣って', '池作って', '覚えてること', 'とまれ'];
+  const ACCENTS = { Nemu: '#7ec8e3', Yume: '#f2a7c3' };
+  const QUICK = ['うちかえる', '預けて', '釣って', '池作って', '片付けて', '建て直して', '井戸', '羊探して', '助けて', '覚えてること', 'とまれ'];
   function slotEl(item, extraCls) {
     const d = document.createElement('div');
     d.className = 'slot' + (extraCls ? ' ' + extraCls : '');
@@ -175,6 +190,8 @@
     const u = b.username;
     if (!b.armor) { $('act-' + u).textContent = 'オフライン'; return; }
     $('dot-' + u).className = 'dot' + (b.online ? ' on' : '');
+    const panel = $('panel-' + u);
+    if (panel) panel.classList.toggle('danger', !!b.online && (b.health <= 6 || b.food <= 6));
     $('act-' + u).textContent = b.activity || '—';
     fill($('armor-' + u), [b.armor.helmet, b.armor.chestplate, b.armor.leggings, b.armor.boots]);
     fill($('offhand-' + u), [b.offhand]);
@@ -189,6 +206,44 @@
     const p = b.position;
     $('pos-' + u).textContent = 'X ' + p.x.toFixed(1) + ' / Y ' + p.y.toFixed(1) + ' / Z ' + p.z.toFixed(1);
     $('dir-' + u).textContent = compass(b.yaw);
+  }
+  function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function drawMap(data) {
+    const cv = $('map'); if (!cv) return;
+    const g = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    g.clearRect(0, 0, W, H);
+    const first = data.bodies[0];
+    const pts = [];
+    const spots = (first && first.memory && first.memory.spots) || {};
+    const addSpot = (x, z, label, color) => { if (typeof x === 'number' && typeof z === 'number') pts.push({ x, z, label, color, spot: true }); };
+    if (first && first.home) addSpot(first.home.x, first.home.z, '拠点', '#e8e8e8');
+    if (spots.pond) addSpot(spots.pond.ox + 2, spots.pond.oz + 2, '池', '#5aa9e6');
+    if (spots.water) addSpot(spots.water.x, spots.water.z, '水場', '#5aa9e6');
+    if (spots.lake) addSpot(spots.lake.x, spots.lake.z, '湖', '#5aa9e6');
+    if (spots.well) addSpot(spots.well.x, spots.well.z, '井戸', '#5aa9e6');
+    if (spots.forest) addSpot(spots.forest.x, spots.forest.z, '森', '#7ee24a');
+    if (spots.stone) addSpot(spots.stone.x, spots.stone.z, '石', '#9a9aa5');
+    for (const b of data.bodies) if (b.online && b.position) pts.push({ x: b.position.x, z: b.position.z, label: b.callName || b.username, color: ACCENTS[b.username] || '#fff', spot: false });
+    if (!pts.length) { g.fillStyle = '#9a9aa5'; g.font = '12px sans-serif'; g.fillText('データなし', 10, 20); return; }
+    let minX = Math.min(...pts.map(p => p.x)), maxX = Math.max(...pts.map(p => p.x));
+    let minZ = Math.min(...pts.map(p => p.z)), maxZ = Math.max(...pts.map(p => p.z));
+    const pad = 18;
+    minX -= pad; maxX += pad; minZ -= pad; maxZ += pad;
+    const sc = Math.min(W / (maxX - minX), H / (maxZ - minZ));
+    const px = (x) => (x - minX) * sc, pz = (z) => (z - minZ) * sc;
+    g.strokeStyle = '#2c2c35'; g.beginPath();
+    for (let gx = Math.ceil(minX / 20) * 20; gx <= maxX; gx += 20) { g.moveTo(px(gx), 0); g.lineTo(px(gx), H); }
+    for (let gz = Math.ceil(minZ / 20) * 20; gz <= maxZ; gz += 20) { g.moveTo(0, pz(gz)); g.lineTo(W, pz(gz)); }
+    g.stroke();
+    g.font = '11px sans-serif'; g.textBaseline = 'middle';
+    for (const p of pts) {
+      g.fillStyle = p.color;
+      g.beginPath(); g.arc(px(p.x), pz(p.z), p.spot ? 3.5 : 5.5, 0, Math.PI * 2); g.fill();
+      if (!p.spot) { g.strokeStyle = '#fff'; g.lineWidth = 1.5; g.stroke(); g.lineWidth = 1; }
+      g.fillStyle = '#e8e8e8';
+      g.fillText(p.label, px(p.x) + 8, pz(p.z));
+    }
   }
   async function tick() {
     try {
@@ -217,6 +272,19 @@
         $('mem-death').textContent = mc.lastDeath ? ('X ' + mc.lastDeath.x + ' / Z ' + mc.lastDeath.z + (mc.lastDeath.byMob ? '（モンスター）' : '')) : '—';
       }
       if (data.settings) SETTING_KEYS.forEach(k => { const el = $('set-' + k); if (el && document.activeElement !== el) el.checked = !!data.settings[k]; });
+      const sh = data.shared || {};
+      const slines = [];
+      if (sh.helpReq) slines.push('🆘 ' + esc(sh.helpReq.by) + ' が助けを求めています（' + sh.helpReq.x + ', ' + sh.helpReq.y + ', ' + sh.helpReq.z + '）');
+      if (sh.rescue) slines.push('⛏ 救助中: ' + esc(sh.rescue.by) + ' → ' + esc(sh.rescue.for) + '（' + esc(sh.rescue.phase) + '）');
+      if (sh.medicReq) slines.push('🍖 ' + esc(sh.medicReq.by) + ' が食料を必要としています（hp ' + sh.medicReq.hp + '）');
+      if (sh.pondJob) slines.push('💧 水運び分担中（' + esc(sh.pondJob.by) + ' 主導・残り ' + sh.pondJob.remaining + ' マス）');
+      $('shared-status').innerHTML = slines.length ? slines.map(l => '<div class="row"><span>' + l + '</span></div>').join('') : '<div class="row"><span>特になし</span></div>';
+      drawMap(data);
+      try {
+        const er = await fetch('/api/events', { cache: 'no-store' });
+        const ej = await er.json();
+        $('events').innerHTML = (ej.events && ej.events.length) ? ej.events.map(esc).join('<br>') : 'まだイベントはありません';
+      } catch (e) { /* keep the previous events on a transient failure */ }
     } catch (e) {
       $('conn').innerHTML = '<span class="err">状態APIに接続できません</span>';
     }
