@@ -41,9 +41,9 @@ function wireLifecycle(ctx, cfg) {
     ctx.say(cfg.primary ? 'ねむ、来たよ' : 'ゆめ、来たよ');
     console.log(`spawned as ${cfg.username} at ${bot.entity.position}`);
     // auto-totem: try plugin, fall back to manual off-hand equip
-    const totemTick = async () => { try { if (S.autototemOk && bot.autototem?.equip) bot.autototem.equip(); else { const off = bot.inventory.slots[45]; if (!off && bot.health <= 10) { const t = bot.inventory.items().find(i => i.name === 'totem_of_undying'); if (t) await bot.equip(t, 'off-hand'); } } } catch {} };
+    const totemTick = async () => { try { if (S.autototemOk && bot.autototem?.equip) { const p = bot.autototem.equip(); if (p && p.catch) p.catch(() => {}); } else { const off = bot.inventory.slots[45]; if (!off && bot.health <= 10) { const t = bot.inventory.items().find(i => i.name === 'totem_of_undying'); if (t) await bot.equip(t, 'off-hand'); } } } catch {} };
     bot.on('physicsTick', totemTick);
-    setTimeout(() => { try { bot.armorManager?.equipAll(); } catch {} }, 2000);
+    setTimeout(() => { try { const p = bot.armorManager?.equipAll(); if (p && p.catch) p.catch(() => {}); } catch {} }, 2000);
     if (S.deathPos) ctx.say(`前に死んだ場所は ${Math.floor(S.deathPos.x)}, ${Math.floor(S.deathPos.y)}, ${Math.floor(S.deathPos.z)}。「もどって」で戻るよ`);
     // Env-driven solo demos only ever run on the primary body.
     if (cfg.primary) {
@@ -54,5 +54,9 @@ function wireLifecycle(ctx, cfg) {
   });
   bot.on('kicked', (r) => console.log(`kicked (${cfg.username}):`, r));
   bot.on('error', (e) => console.log(`error (${cfg.username}):`, e.message));
-  bot.on('end', (r) => console.log(`disconnected (${cfg.username}):`, r));
+  // No in-process reconnect exists: a dropped body used to leave a
+  // zombie process serving stale dashboards forever (audit 2026-11-25).
+  // Exit instead and let systemd restart the pair into fresh logins
+  // (the dev copy's proven pattern; requires Restart=always).
+  bot.on('end', (r) => { console.log(`disconnected (${cfg.username}):`, r); setTimeout(() => process.exit(1), 3000); });
 }
