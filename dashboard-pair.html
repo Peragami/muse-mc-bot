@@ -69,6 +69,19 @@
   <span id="gtime" style="font-size:13px;color:#bdbdc7;">—</span>
   <span id="conn" style="font-size:12px;color:#9a9aa5;">接続中…</span>
 </header>
+<div class="panel" style="margin-bottom:12px">
+  <div class="panel-head"><span class="dot on"></span><span class="name" style="color:#ffd97a">見学カメラ</span><span class="uname">MuzeCam（スペクテイター）</span><span class="act" id="cam-pos">—</span></div>
+  <div class="view-wrap"><iframe id="cam-view" title="見学カメラ"></iframe></div>
+  <div class="cmdbar" id="cam-bar">
+    <span style="font-size:12px;color:#9a9aa5">視点:</span>
+    <button data-tp="178,78,-105">拠点</button>
+    <button data-tp="196,76,-133">釣り池</button>
+    <button data-tp="168,72,-7">湖</button>
+    <button data-tp="178,95,-105">拠点の上空</button>
+    <span class="sent" id="cam-sent"></span>
+  </div>
+  <div style="padding:0 12px 10px;font-size:12px;color:#9a9aa5">ドラッグで回転、ホイールでズームできます</div>
+</div>
 <div class="panels" id="panels"></div>
 <div class="shared">
   <div class="info settings">
@@ -301,6 +314,27 @@
       } catch (e) { el.checked = !el.checked; }
     });
   });
+  const camFrame = $('cam-view');
+  if (camFrame) camFrame.src = location.protocol + '//' + location.hostname + ':3027/';
+  document.querySelectorAll('#cam-bar button[data-tp]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const parts = btn.dataset.tp.split(',').map(Number);
+      const el = $('cam-sent');
+      try {
+        const r = await fetch(location.protocol + '//' + location.hostname + ':3028/api/tp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ x: parts[0], y: parts[1], z: parts[2] }) });
+        el.textContent = r.ok ? ('視点: ' + btn.textContent) : '移動に失敗';
+      } catch (e) { el.textContent = '移動に失敗'; }
+      setTimeout(() => { el.textContent = ''; }, 4000);
+    });
+  });
+  async function camTick() {
+    try {
+      const r = await fetch(location.protocol + '//' + location.hostname + ':3028/api/state', { cache: 'no-store' });
+      const j = await r.json();
+      $('cam-pos').textContent = j.online ? ('X ' + j.position.x.toFixed(0) + ' / Y ' + j.position.y.toFixed(0) + ' / Z ' + j.position.z.toFixed(0)) : 'オフライン';
+    } catch (e) { $('cam-pos').textContent = '接続できません'; }
+  }
+  camTick(); setInterval(camTick, 5000);
   tick(); setInterval(tick, 2000);
 </script>
 </body>
