@@ -38,7 +38,7 @@ function wireLifecycle(ctx, cfg) {
     // (evidence 2026-11-24). All real digging is explicit bot.dig.
     try { const mv = new Movements(bot); mv.canDig = false; bot.pathfinder.setMovements(mv); } catch {}
     ctx.setupStateMachine(); ctx.startViewer(); ctx.startStateServer();
-    ctx.say(cfg.primary ? 'むぜ、来たよ' : 'ゆめ、来たよ');
+    ctx.say(cfg.primary ? 'ねむ、来たよ' : 'ゆめ、来たよ');
     console.log(`spawned as ${cfg.username} at ${bot.entity.position}`);
     // auto-totem: try plugin, fall back to manual off-hand equip
     const totemTick = async () => { try { if (S.autototemOk && bot.autototem?.equip) bot.autototem.equip(); else { const off = bot.inventory.slots[45]; if (!off && bot.health <= 10) { const t = bot.inventory.items().find(i => i.name === 'totem_of_undying'); if (t) await bot.equip(t, 'off-hand'); } } } catch {} };
