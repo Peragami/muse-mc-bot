@@ -71,7 +71,7 @@
 </header>
 <div class="panel" style="margin-bottom:12px">
   <div class="panel-head"><span class="dot on"></span><span class="name" style="color:#ffd97a">見学カメラ</span><span class="uname">MuzeCam（スペクテイター）</span><span class="act" id="cam-pos">—</span></div>
-  <div class="view-wrap"><iframe id="cam-view" title="見学カメラ"></iframe></div>
+  <div class="view-wrap" style="position:relative"><iframe id="cam-view" title="見学カメラ"></iframe><div id="cam-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,10,16,.45);color:#fff;font-size:15px;font-weight:600;cursor:pointer;text-align:center;padding:12px">クリックで操作開始（マウス視点＋WASDで自由に飛べます）</div></div>
   <div class="cmdbar" id="cam-bar">
     <span style="font-size:12px;color:#9a9aa5">視点:</span>
     <button data-tp="178,78,-105">拠点</button>
@@ -80,7 +80,7 @@
     <button data-tp="178,95,-105">拠点の上空</button>
     <span class="sent" id="cam-sent"></span>
   </div>
-  <div style="padding:0 12px 10px;font-size:12px;color:#9a9aa5">ドラッグで回転、ホイールでズームできます</div>
+  <div style="padding:0 12px 10px;font-size:12px;color:#9a9aa5">操作中: マウスで視点 / WASDで移動（見る方向へ飛びます） / Space・Eで上昇 / C・Qで下降 / Shiftでダッシュ / Escで終了</div>
 </div>
 <div class="panels" id="panels"></div>
 <div class="shared">
@@ -335,6 +335,56 @@
     } catch (e) { $('cam-pos').textContent = '接続できません'; }
   }
   camTick(); setInterval(camTick, 5000);
+
+  // ---- spectator free-fly control (pointer lock + WASD) ----
+  const camOverlay = $('cam-overlay');
+  const ctl = { yaw: 0, pitch: 0, keys: {}, ws: null, timer: null };
+  function camWsUrl() { return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.hostname + ':3028/'; }
+  async function syncLook() {
+    try {
+      const r = await fetch(location.protocol + '//' + location.hostname + ':3028/api/state', { cache: 'no-store' });
+      const j = await r.json();
+      if (j.online) { ctl.yaw = j.yaw || 0; ctl.pitch = j.pitch || 0; }
+    } catch (e) { /* keep previous look */ }
+  }
+  function sendCtl() {
+    if (!ctl.ws || ctl.ws.readyState !== 1) return;
+    const k = ctl.keys;
+    try { ctl.ws.send(JSON.stringify({ yaw: ctl.yaw, pitch: ctl.pitch, f: !!k.KeyW, b: !!k.KeyS, l: !!k.KeyA, r: !!k.KeyD, up: !!(k.Space || k.KeyE), down: !!(k.KeyC || k.KeyQ), boost: !!(k.ShiftLeft || k.ShiftRight) })); } catch (e) { /* socket closing */ }
+  }
+  camOverlay.addEventListener('click', async () => { await syncLook(); camOverlay.requestPointerLock(); });
+  document.addEventListener('pointerlockchange', () => {
+    const locked = document.pointerLockElement === camOverlay;
+    camOverlay.style.background = locked ? 'transparent' : 'rgba(10,10,16,.45)';
+    camOverlay.textContent = locked ? '' : 'クリックで操作開始（マウス視点＋WASDで自由に飛べます）';
+    if (locked) {
+      ctl.ws = new WebSocket(camWsUrl());
+      ctl.ws.onopen = () => sendCtl();
+      ctl.timer = setInterval(sendCtl, 50);
+    } else {
+      if (ctl.timer) clearInterval(ctl.timer);
+      ctl.timer = null; ctl.keys = {};
+      if (ctl.ws) { const ws = ctl.ws; ctl.ws = null; try { ws.send(JSON.stringify({ yaw: ctl.yaw, pitch: ctl.pitch })); ws.close(); } catch (e) { /* already closed */ } }
+    }
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (document.pointerLockElement !== camOverlay) return;
+    ctl.yaw += e.movementX * 0.0024;
+    ctl.pitch += e.movementY * 0.0024;
+    ctl.pitch = Math.max(-1.55, Math.min(1.55, ctl.pitch));
+    sendCtl();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (document.pointerLockElement !== camOverlay) return;
+    ctl.keys[e.code] = true;
+    if (['Space', 'KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyC', 'KeyQ', 'KeyE'].includes(e.code)) e.preventDefault();
+    sendCtl();
+  });
+  document.addEventListener('keyup', (e) => {
+    if (document.pointerLockElement !== camOverlay) return;
+    ctl.keys[e.code] = false;
+    sendCtl();
+  });
   tick(); setInterval(tick, 2000);
 </script>
 </body>
